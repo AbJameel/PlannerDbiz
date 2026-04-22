@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 18
+VisualStudioVersion = 18.5.11626.173 insiders
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PlannerApi", "PlannerApi\PlannerApi.csproj", "{C44593F6-FCB1-851B-58E0-9076B5CC088A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dbiz.MailboxWorker", "Dbiz.MailboxWorker\Dbiz.MailboxWorker.csproj", "{510C97CB-2A9B-CD7E-7C2B-2F26FB6E03C6}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{C44593F6-FCB1-851B-58E0-9076B5CC088A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C44593F6-FCB1-851B-58E0-9076B5CC088A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C44593F6-FCB1-851B-58E0-9076B5CC088A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C44593F6-FCB1-851B-58E0-9076B5CC088A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{510C97CB-2A9B-CD7E-7C2B-2F26FB6E03C6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{510C97CB-2A9B-CD7E-7C2B-2F26FB6E03C6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{510C97CB-2A9B-CD7E-7C2B-2F26FB6E03C6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{510C97CB-2A9B-CD7E-7C2B-2F26FB6E03C6}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {458D9272-F2B2-4514-A124-C0C89D3A283A}
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,68 @@
+[
+  {
+    "id": 1,
+    "name": "Asha Nair",
+    "currentRole": "Senior Business Analyst",
+    "expectedBudget": 8400,
+    "experienceYears": 8,
+    "noticePeriod": "30 days",
+    "resumeFile": "asha-nair-resume.pdf",
+    "skills": ["Business Analysis", "Banking", "UAT", "Stakeholder Management"],
+    "location": "Singapore"
+  },
+  {
+    "id": 2,
+    "name": "Karthik Raj",
+    "currentRole": "Infrastructure Engineer",
+    "expectedBudget": 8900,
+    "experienceYears": 6,
+    "noticePeriod": "Immediate",
+    "resumeFile": "karthik-raj-resume.pdf",
+    "skills": ["Azure", "VMware", "Infra Support", "Windows Server"],
+    "location": "Singapore"
+  },
+  {
+    "id": 3,
+    "name": "Melissa Goh",
+    "currentRole": "Business Analyst",
+    "expectedBudget": 8700,
+    "experienceYears": 7,
+    "noticePeriod": "15 days",
+    "resumeFile": "melissa-goh-resume.pdf",
+    "skills": ["Business Analysis", "Process Mapping", "Stakeholder Management"],
+    "location": "Malaysia"
+  },
+  {
+    "id": 4,
+    "name": "Sathish Kumar",
+    "currentRole": "Project Manager",
+    "expectedBudget": 11500,
+    "experienceYears": 10,
+    "noticePeriod": "30 days",
+    "resumeFile": "sathish-kumar-resume.pdf",
+    "skills": ["Project Management", "Cloud Migration", "Governance"],
+    "location": "Singapore"
+  },
+  {
+    "id": 5,
+    "name": "Rachel Lee",
+    "currentRole": "QA Analyst",
+    "expectedBudget": 6300,
+    "experienceYears": 5,
+    "noticePeriod": "Immediate",
+    "resumeFile": "rachel-lee-resume.pdf",
+    "skills": ["QA", "Automation", "API Testing"],
+    "location": "Singapore"
+  },
+  {
+    "id": 6,
+    "name": "Vignesh N",
+    "currentRole": "Azure DevOps Engineer",
+    "expectedBudget": 10800,
+    "experienceYears": 9,
+    "noticePeriod": "20 days",
+    "resumeFile": "vignesh-n-resume.pdf",
+    "skills": ["Azure DevOps", "Terraform", "AKS", "CI/CD"],
+    "location": "India"
+  }
+]

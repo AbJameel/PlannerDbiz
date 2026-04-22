@@ -1,0 +1,29 @@
+[
+  {
+    "id": 1,
+    "name": "Insight BA Partners",
+    "email": "ops@insightba.com",
+    "coverageRoles": "Business Analyst, Project Manager",
+    "budgetMin": 8000,
+    "budgetMax": 13000,
+    "status": "Active"
+  },
+  {
+    "id": 2,
+    "name": "InfraTalent Partners",
+    "email": "delivery@infratalent.sg",
+    "coverageRoles": "Infrastructure Engineer, Azure DevOps Engineer",
+    "budgetMin": 8500,
+    "budgetMax": 15000,
+    "status": "Active"
+  },
+  {
+    "id": 3,
+    "name": "Quality Bridge",
+    "email": "hello@qualitybridge.io",
+    "coverageRoles": "QA Analyst, Test Lead",
+    "budgetMin": 6000,
+    "budgetMax": 9000,
+    "status": "Active"
+  }
+]

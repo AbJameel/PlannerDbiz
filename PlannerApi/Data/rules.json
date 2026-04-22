@@ -1,0 +1,26 @@
+[
+  {
+    "id": 1,
+    "name": "BA Minimum Budget",
+    "category": "Budget",
+    "condition": "If Role = Business Analyst and Budget < 9000 SGD",
+    "outcome": "Flag as budget gap and require manual review",
+    "isActive": true
+  },
+  {
+    "id": 2,
+    "name": "Infra Vendor Routing",
+    "category": "Assignment",
+    "condition": "If role contains Infrastructure or Azure and budget between 8000 and 12000",
+    "outcome": "Recommend InfraTalent Partners",
+    "isActive": true
+  },
+  {
+    "id": 3,
+    "name": "SLA Urgent Tag",
+    "category": "SLA",
+    "condition": "If SLA is within 48 hours",
+    "outcome": "Mark priority as High",
+    "isActive": true
+  }
+]

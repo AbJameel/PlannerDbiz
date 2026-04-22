@@ -1,0 +1,29 @@
+[
+  {
+    "id": 1,
+    "subject": "Urgent - Senior BA profiles required for banking program",
+    "fromEmail": "darren.lim@contoso.com",
+    "receivedOn": "2026-04-21T08:20:00",
+    "snippet": "We need 2 senior BA resources with banking transformation experience before Friday evening.",
+    "isRead": false,
+    "sourceType": "Inbox"
+  },
+  {
+    "id": 2,
+    "subject": "Infra engineer support for migration wave 2",
+    "fromEmail": "michelle.tan@fabrikam.com",
+    "receivedOn": "2026-04-21T07:40:00",
+    "snippet": "Please share one infra engineer with Azure and VMware experience. Budget around 9K SGD.",
+    "isRead": false,
+    "sourceType": "Uploaded Mail"
+  },
+  {
+    "id": 3,
+    "subject": "Project manager for APAC rollout",
+    "fromEmail": "ria@northwind.com",
+    "receivedOn": "2026-04-20T16:10:00",
+    "snippet": "Need an experienced PM for a regional cloud migration rollout and vendor governance.",
+    "isRead": true,
+    "sourceType": "Inbox"
+  }
+]

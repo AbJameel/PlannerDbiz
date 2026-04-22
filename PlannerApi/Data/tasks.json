@@ -1,0 +1,165 @@
+[
+  {
+    "id": 1,
+    "plannerNo": "PLN-2026-001",
+    "clientName": "Contoso Singapore",
+    "role": "Senior Business Analyst",
+    "priority": "High",
+    "budget": 8500,
+    "currency": "SGD",
+    "receivedOn": "2026-04-21T08:20:00",
+    "slaDate": "2026-04-24T18:00:00",
+    "status": "New",
+    "openPositions": 2,
+    "sourceType": "Mailbox",
+    "contactName": "Darren Lim",
+    "contactEmail": "darren.lim@contoso.com",
+    "requirementAsked": "Need 2 senior BAs with banking transformation experience and strong stakeholder management. Profiles required before Friday 6 PM.",
+    "skills": ["Business Analysis", "Banking", "UAT", "Stakeholder Management"],
+    "gaps": ["Budget slightly lower than preferred BA benchmark", "Needs fast turnaround within 3 days"],
+    "timeline": [
+      {
+        "happenedOn": "2026-04-21T08:20:00",
+        "title": "Requirement email received",
+        "description": "Email captured from DBiz Outlook inbox and converted into planner task.",
+        "performedBy": "System"
+      },
+      {
+        "happenedOn": "2026-04-21T08:25:00",
+        "title": "Rule evaluation completed",
+        "description": "Budget warning raised, role supported, candidate search enabled.",
+        "performedBy": "Rule Engine"
+      }
+    ],
+    "recommendedCandidateIds": [1, 3],
+    "assignedVendorIds": [1]
+  },
+  {
+    "id": 2,
+    "plannerNo": "PLN-2026-002",
+    "clientName": "Fabrikam APAC",
+    "role": "Infrastructure Engineer",
+    "priority": "Medium",
+    "budget": 9000,
+    "currency": "SGD",
+    "receivedOn": "2026-04-21T07:40:00",
+    "slaDate": "2026-04-25T12:00:00",
+    "status": "New",
+    "openPositions": 1,
+    "sourceType": "Uploaded Mail",
+    "contactName": "Michelle Tan",
+    "contactEmail": "michelle.tan@fabrikam.com",
+    "requirementAsked": "Urgent infra engineer with Azure, VMware, and migration support background.",
+    "skills": ["Azure", "VMware", "Infra Support", "Migration"],
+    "gaps": ["Need to verify on-call support scope"],
+    "timeline": [
+      {
+        "happenedOn": "2026-04-21T07:40:00",
+        "title": "Uploaded email converted",
+        "description": "Admin uploaded raw email file and planner was created.",
+        "performedBy": "Abdul Jameel"
+      }
+    ],
+    "recommendedCandidateIds": [2],
+    "assignedVendorIds": [2]
+  },
+  {
+    "id": 3,
+    "plannerNo": "PLN-2026-003",
+    "clientName": "Northwind Global",
+    "role": "Project Manager",
+    "priority": "High",
+    "budget": 12000,
+    "currency": "SGD",
+    "receivedOn": "2026-04-20T16:10:00",
+    "slaDate": "2026-04-23T17:00:00",
+    "status": "Under Review",
+    "openPositions": 1,
+    "sourceType": "Mailbox",
+    "contactName": "Ria Mohan",
+    "contactEmail": "ria@northwind.com",
+    "requirementAsked": "Need PM for cloud migration rollout, regional coordination, and vendor governance.",
+    "skills": ["Project Management", "Cloud Migration", "Governance", "Stakeholder Management"],
+    "gaps": ["Need client clarification on travel expectations"],
+    "timeline": [
+      {
+        "happenedOn": "2026-04-20T16:10:00",
+        "title": "Requirement email received",
+        "description": "Planner created from Outlook mailbox.",
+        "performedBy": "System"
+      },
+      {
+        "happenedOn": "2026-04-20T16:45:00",
+        "title": "Admin opened review",
+        "description": "DBiz admin started manual review for travel and budget fit.",
+        "performedBy": "DBiz Admin"
+      }
+    ],
+    "recommendedCandidateIds": [4],
+    "assignedVendorIds": []
+  },
+  {
+    "id": 4,
+    "plannerNo": "PLN-2026-004",
+    "clientName": "Adventure Works",
+    "role": "QA Analyst",
+    "priority": "Low",
+    "budget": 6500,
+    "currency": "SGD",
+    "receivedOn": "2026-04-20T12:00:00",
+    "slaDate": "2026-04-26T17:00:00",
+    "status": "Assigned to Vendor",
+    "openPositions": 2,
+    "sourceType": "Mailbox",
+    "contactName": "Alicia Ong",
+    "contactEmail": "alicia@adventureworks.com",
+    "requirementAsked": "Looking for two QA analysts with automation exposure and API testing experience.",
+    "skills": ["QA", "Automation", "API Testing", "Regression"],
+    "gaps": [],
+    "timeline": [
+      {
+        "happenedOn": "2026-04-20T12:00:00",
+        "title": "Email received",
+        "description": "New planner created.",
+        "performedBy": "System"
+      },
+      {
+        "happenedOn": "2026-04-20T13:15:00",
+        "title": "Vendor assigned",
+        "description": "Task routed to QA specialist vendor based on automation profile.",
+        "performedBy": "DBiz Admin"
+      }
+    ],
+    "recommendedCandidateIds": [5],
+    "assignedVendorIds": [3]
+  },
+  {
+    "id": 5,
+    "plannerNo": "PLN-2026-005",
+    "clientName": "Litware",
+    "role": "Azure DevOps Engineer",
+    "priority": "High",
+    "budget": 11000,
+    "currency": "SGD",
+    "receivedOn": "2026-04-19T18:30:00",
+    "slaDate": "2026-04-22T15:00:00",
+    "status": "New",
+    "openPositions": 1,
+    "sourceType": "Mailbox",
+    "contactName": "Ben Wong",
+    "contactEmail": "ben@litware.com",
+    "requirementAsked": "Need senior DevOps engineer with Azure pipelines, Terraform, AKS, and release governance.",
+    "skills": ["Azure DevOps", "Terraform", "AKS", "CI/CD"],
+    "gaps": ["Need faster shortlist within 24 hours"],
+    "timeline": [
+      {
+        "happenedOn": "2026-04-19T18:30:00",
+        "title": "Planner created",
+        "description": "JD parsed successfully from mailbox email.",
+        "performedBy": "System"
+      }
+    ],
+    "recommendedCandidateIds": [6],
+    "assignedVendorIds": [2]
+  }
+]
