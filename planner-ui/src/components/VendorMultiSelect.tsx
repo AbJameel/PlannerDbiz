@@ -1,0 +1,151 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+
+type VendorOption = {
+  id: number;
+  name: string;
+  coverageRoles: string;
+  budgetMin: number;
+  budgetMax: number;
+  status: string;
+};
+
+type VendorMultiSelectProps = {
+  vendors: VendorOption[];
+  selectedVendorIds: number[];
+  onChange: (ids: number[]) => void;
+};
+
+export function VendorMultiSelect({
+  vendors,
+  selectedVendorIds,
+  onChange
+}: VendorMultiSelectProps) {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (!wrapperRef.current) return;
+      if (!wrapperRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const activeVendors = useMemo(
+    () => vendors.filter((v) => v.status?.toLowerCase() !== 'inactive'),
+    [vendors]
+  );
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return activeVendors;
+
+    return activeVendors.filter((vendor) =>
+      [
+        vendor.name,
+        vendor.coverageRoles,
+        String(vendor.budgetMin),
+        String(vendor.budgetMax)
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(q)
+    );
+  }, [activeVendors, query]);
+
+  const selectedVendors = activeVendors.filter((v) =>
+    selectedVendorIds.includes(v.id)
+  );
+
+  function toggleVendor(id: number) {
+    if (selectedVendorIds.includes(id)) {
+      onChange(selectedVendorIds.filter((x) => x !== id));
+    } else {
+      onChange([...selectedVendorIds, id]);
+    }
+  }
+
+  function removeVendor(id: number) {
+    onChange(selectedVendorIds.filter((x) => x !== id));
+  }
+
+  return (
+    <div className="vendor-multiselect" ref={wrapperRef}>
+      <div
+        className={`vendor-select-box ${open ? 'open' : ''}`}
+        onClick={() => setOpen(true)}
+      >
+        <div className="selected-tags">
+          {selectedVendors.length === 0 ? (
+            <span className="placeholder">Search and select vendors...</span>
+          ) : (
+            selectedVendors.map((vendor) => (
+              <span key={vendor.id} className="selected-tag">
+                {vendor.name}
+                <button
+                  type="button"
+                  className="remove-tag-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeVendor(vendor.id);
+                  }}
+                >
+                  ×
+                </button>
+              </span>
+            ))
+          )}
+        </div>
+
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          placeholder={selectedVendors.length > 0 ? '' : 'Search and select vendors...'}
+          className="vendor-search-input"
+        />
+      </div>
+
+      {open && (
+        <div className="vendor-dropdown">
+          {filtered.length === 0 ? (
+            <div className="vendor-option empty">No vendors found.</div>
+          ) : (
+            filtered.map((vendor) => {
+              const selected = selectedVendorIds.includes(vendor.id);
+
+              return (
+                <label
+                  key={vendor.id}
+                  className={`vendor-option ${selected ? 'selected' : ''}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    onChange={() => toggleVendor(vendor.id)}
+                  />
+                  <div className="vendor-option-content">
+                    <strong>{vendor.name}</strong>
+                    <small>{vendor.coverageRoles}</small>
+                    <small>
+                      Budget {vendor.budgetMin} - {vendor.budgetMax}
+                    </small>
+                  </div>
+                </label>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

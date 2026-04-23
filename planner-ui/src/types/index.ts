@@ -1,3 +1,4 @@
+
 export type DashboardSummary = {
   newTasks: number;
   underReview: number;
@@ -16,9 +17,12 @@ export type PlannerTask = {
   id: number;
   plannerNo: string;
   clientName: string;
+  requirementTitle: string;
   role: string;
+  category: string;
   priority: string;
   budget: number;
+  budgetMax?: number | null;
   currency: string;
   receivedOn: string;
   slaDate: string;
@@ -27,9 +31,17 @@ export type PlannerTask = {
   sourceType: string;
   contactName: string;
   contactEmail: string;
+  contactPhone: string;
   requirementAsked: string;
+  notes: string;
   skills: string[];
+  secondarySkills: string[];
   gaps: string[];
+  experienceRequired: string;
+  location: string;
+  workMode: string;
+  employmentType: string;
+  recruiterOverrideComment: string;
   timeline: TimelineItem[];
   recommendedCandidateIds: number[];
   assignedVendorIds: number[];

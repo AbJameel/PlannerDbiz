@@ -47,3 +47,15 @@
 - `GET/POST /api/vendors`
 - `GET/POST /api/candidates`
 - `GET /api/mailbox`
+
+
+## Auth module
+- Login: `/login`
+- First-time activation: `/activate-account`
+- Super Admin Users page: `/admin/users`
+
+Seed admin after running SQL:
+- email: `admin@dbiz.com`
+- password: `Admin@123`
+
+New users are created by Super Admin. Activation email is simulated in API logs with OTP and link.
