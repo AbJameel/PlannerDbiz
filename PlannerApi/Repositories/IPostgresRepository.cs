@@ -16,6 +16,17 @@ public interface IPostgresRepository
     Task<DashboardSummary> GetSummaryAsync();
     Task<IReadOnlyList<Candidate>> GetRecommendedCandidatesAsync(int taskId);
     Task<int> CreateTaskAsync(string subject, string fromEmail, string body, string? sourceType = null, string? fileName = null);
+    Task<int> CreateTaskFromGptExtractionAsync(
+        GptExtractedJobInfo job,
+        string fallbackSubject,
+        string fallbackFromEmail,
+        string sourceType,
+        string? fileName,
+        string gptFileId,
+        string extractorJson,
+        string jdAnalysis,
+        string clarificationEmail);
+    Task SaveGapAnalysisReplyAsync(int taskId, string gptFileId, string gapAnalysis, string clarificationEmail, string extractorJson);
     Task UpdateTaskAsync(int id, UpdateTaskRequest request, string performedBy);
     Task AssignVendorsAsync(int id, AssignVendorsRequest request, string performedBy);
     Task<int> CreateRuleAsync(Rule rule);

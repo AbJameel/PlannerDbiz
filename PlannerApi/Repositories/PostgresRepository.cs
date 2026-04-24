@@ -222,6 +222,172 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
         }
     }
 
+    public async Task<int> CreateTaskFromGptExtractionAsync(
+        GptExtractedJobInfo job,
+        string fallbackSubject,
+        string fallbackFromEmail,
+        string sourceType,
+        string? fileName,
+        string gptFileId,
+        string extractorJson,
+        string jdAnalysis,
+        string clarificationEmail)
+    {
+        var combinedText = $"{job.JobDetails}\n{job.SpecialNotes}\n{job.Timeline}\n{job.IndicativeOnboardingTimeline}\n{job.Deadline}\n{jdAnalysis}";
+        var role = FirstNonEmpty(job.Role, job.Title, GuessRole(fallbackSubject, combinedText));
+        var requirementTitle = FirstNonEmpty(job.Title, job.Role, fallbackSubject, role);
+        var client = FirstNonEmpty(job.Agency, "DBiz Internal");
+        var fromEmail = FirstNonEmpty(job.Sender, fallbackFromEmail, "internal@dbiz.com");
+        var contactName = FirstNonEmpty(job.Name, "Internal Request");
+        var contactDetails = job.ContactDetails ?? string.Empty;
+        var budget = GuessBudget(combinedText);
+        var budgetMax = budget > 0 ? budget + 1500 : (decimal?)null;
+        var openPositions = ParseIntOrDefault(job.Headcount, GuessOpenPositions(combinedText));
+        var skills = GuessSkills(combinedText);
+        var secondarySkills = GuessSecondarySkills(combinedText, skills);
+        var gaps = ExtractGapsFromAnalysis(jdAnalysis);
+        if (gaps.Count == 0)
+            gaps = BuildGaps(role, budget, combinedText);
+        var priority = budget >= 9000 ? "High" : budget >= 6000 ? "Medium" : "Low";
+        var plannerNo = $"PLN-{DateTime.UtcNow:yyyyMMddHHmmssfff}";
+        var slaDate = ParseDateOrDefault(job.Deadline, ExtractSlaDate(combinedText) ?? DateTime.UtcNow.AddDays(3));
+        var category = GuessCategory(role, combinedText);
+        var requirementAsked = FirstNonEmpty(job.JobDetails, Summarize(combinedText));
+        var notes = $"Auto-created from GPT extracted uploaded file {fileName}. GPT File Id: {gptFileId}";
+        var timeline = new List<TaskTimelineItem>
+        {
+            new()
+            {
+                HappenedOn = DateTime.UtcNow,
+                Title = "Task created from GPT analysis",
+                Description = "Planner task created from uploaded mail/JD using GPT extractor, analyser and clarification pipeline.",
+                PerformedBy = "System"
+            }
+        };
+
+        const string insertTask = @"
+            insert into planner_task
+            (planner_no, client_name, requirement_title, role, category, priority, budget, budget_max, currency, received_on, sla_date, status, open_positions,
+             source_type, contact_name, contact_email, contact_phone, requirement_asked, notes, skills_json, secondary_skills_json, gaps_json, timeline_json,
+             experience_required, location, work_mode, employment_type, recruiter_override_comment, recommended_candidate_ids_json, assigned_vendor_ids_json)
+            values
+            (@planner_no, @client_name, @requirement_title, @role, @category, @priority, @budget, @budget_max, @currency, now(), @sla_date, 'New', @open_positions,
+             @source_type, @contact_name, @contact_email, @contact_phone, @requirement_asked, @notes, @skills_json::jsonb, @secondary_skills_json::jsonb, @gaps_json::jsonb, @timeline_json::jsonb,
+             @experience_required, @location, @work_mode, @employment_type, @recruiter_override_comment, '[]'::jsonb, '[]'::jsonb)
+            returning id;";
+
+        const string insertMailbox = @"insert into mailbox_item (subject, from_email, received_on, snippet, is_read, source_type)
+            values (@subject, @from_email, now(), @snippet, false, @source_type);";
+
+        await using var conn = CreateConnection();
+        await conn.OpenAsync();
+        await using var tx = await conn.BeginTransactionAsync();
+        try
+        {
+            await using var taskCmd = new NpgsqlCommand(insertTask, conn, tx);
+            taskCmd.Parameters.AddWithValue("planner_no", plannerNo);
+            taskCmd.Parameters.AddWithValue("client_name", client);
+            taskCmd.Parameters.AddWithValue("requirement_title", requirementTitle);
+            taskCmd.Parameters.AddWithValue("role", role);
+            taskCmd.Parameters.AddWithValue("category", category);
+            taskCmd.Parameters.AddWithValue("priority", priority);
+            taskCmd.Parameters.AddWithValue("budget", budget);
+            taskCmd.Parameters.AddWithValue("budget_max", (object?)budgetMax ?? DBNull.Value);
+            taskCmd.Parameters.AddWithValue("currency", "SGD");
+            taskCmd.Parameters.AddWithValue("sla_date", slaDate);
+            taskCmd.Parameters.AddWithValue("open_positions", openPositions);
+            taskCmd.Parameters.AddWithValue("source_type", sourceType);
+            taskCmd.Parameters.AddWithValue("contact_name", contactName);
+            taskCmd.Parameters.AddWithValue("contact_email", ExtractEmail(fromEmail));
+            taskCmd.Parameters.AddWithValue("contact_phone", ExtractPhone(contactDetails));
+            taskCmd.Parameters.AddWithValue("requirement_asked", requirementAsked);
+            taskCmd.Parameters.AddWithValue("notes", notes);
+            taskCmd.Parameters.AddWithValue("skills_json", JsonSerializer.Serialize(skills));
+            taskCmd.Parameters.AddWithValue("secondary_skills_json", JsonSerializer.Serialize(secondarySkills));
+            taskCmd.Parameters.AddWithValue("gaps_json", JsonSerializer.Serialize(gaps));
+            taskCmd.Parameters.AddWithValue("timeline_json", JsonSerializer.Serialize(timeline));
+            taskCmd.Parameters.AddWithValue("experience_required", FirstNonEmpty(job.Seniority, GuessExperience(combinedText)));
+            taskCmd.Parameters.AddWithValue("location", GuessLocation(combinedText));
+            taskCmd.Parameters.AddWithValue("work_mode", GuessWorkMode(combinedText));
+            taskCmd.Parameters.AddWithValue("employment_type", FirstNonEmpty(job.DurationOfContract, GuessEmploymentType(combinedText)));
+            taskCmd.Parameters.AddWithValue("recruiter_override_comment", clarificationEmail ?? string.Empty);
+            var taskId = Convert.ToInt32(await taskCmd.ExecuteScalarAsync());
+
+            await using var mailboxCmd = new NpgsqlCommand(insertMailbox, conn, tx);
+            mailboxCmd.Parameters.AddWithValue("subject", requirementTitle);
+            mailboxCmd.Parameters.AddWithValue("from_email", ExtractEmail(fromEmail));
+            mailboxCmd.Parameters.AddWithValue("snippet", Summarize(requirementAsked));
+            mailboxCmd.Parameters.AddWithValue("source_type", sourceType);
+            await mailboxCmd.ExecuteNonQueryAsync();
+
+            var recommendedIds = (await FindRecommendedCandidateIdsAsync(conn, tx, role, budgetMax ?? budget, skills)).ToList();
+            if (recommendedIds.Count > 0)
+            {
+                const string updateSql = "update planner_task set recommended_candidate_ids_json = @ids::jsonb where id = @id;";
+                await using var updateCmd = new NpgsqlCommand(updateSql, conn, tx);
+                updateCmd.Parameters.AddWithValue("ids", JsonSerializer.Serialize(recommendedIds));
+                updateCmd.Parameters.AddWithValue("id", taskId);
+                await updateCmd.ExecuteNonQueryAsync();
+            }
+
+            await tx.CommitAsync();
+            return taskId;
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            logger.LogError(ex, "Error creating GPT extracted task.");
+            throw;
+        }
+    }
+
+    public async Task SaveGapAnalysisReplyAsync(int taskId, string gptFileId, string gapAnalysis, string clarificationEmail, string extractorJson)
+    {
+        const string sql = @"
+            insert into planner_gap_analysis_reply
+            (task_id, gpt_file_id, gap_analysis, clarification_email, extractor_json, created_on)
+            values
+            (@task_id, @gpt_file_id, @gap_analysis, @clarification_email, @extractor_json::jsonb, now());";
+
+        await using var conn = CreateConnection();
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("task_id", taskId);
+        cmd.Parameters.AddWithValue("gpt_file_id", gptFileId);
+        cmd.Parameters.AddWithValue("gap_analysis", gapAnalysis ?? string.Empty);
+        cmd.Parameters.AddWithValue("clarification_email", clarificationEmail ?? string.Empty);
+        cmd.Parameters.AddWithValue("extractor_json", NormalizeJsonArrayForPostgres(extractorJson));
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    private static string NormalizeJsonArrayForPostgres(string? content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+            return "[]";
+
+        var trimmed = content.Trim();
+        var jsonStart = trimmed.IndexOf('[');
+        var jsonEnd = trimmed.LastIndexOf(']');
+
+        if (jsonStart < 0 || jsonEnd <= jsonStart)
+            return "[]";
+
+        var json = trimmed.Substring(jsonStart, jsonEnd - jsonStart + 1);
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array)
+                return "[]";
+
+            return JsonSerializer.Serialize(doc.RootElement);
+        }
+        catch
+        {
+            return "[]";
+        }
+    }
+
     public async Task UpdateTaskAsync(int id, UpdateTaskRequest request, string performedBy)
     {
         const string sql = @"
@@ -374,7 +540,7 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
         cmd.Parameters.AddWithValue("coverage_roles", vendor.CoverageRoles);
         cmd.Parameters.AddWithValue("budget_min", vendor.BudgetMin);
         cmd.Parameters.AddWithValue("budget_max", vendor.BudgetMax);
-        cmd.Parameters.AddWithValue("is_active", vendor.Status.Equals("Active", StringComparison.OrdinalIgnoreCase));
+        cmd.Parameters.AddWithValue("is_active", string.IsNullOrWhiteSpace(vendor.Status) || vendor.Status.Equals("Active", StringComparison.OrdinalIgnoreCase));
         return Convert.ToInt32(await cmd.ExecuteScalarAsync());
     }
 
@@ -398,6 +564,8 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
 
     public async Task<(string VendorComment, IReadOnlyList<VendorCandidateSubmission> Items)> GetVendorSubmissionsAsync(int taskId, int? vendorId = null)
     {
+        await EnsurePlannerCandidateSubmissionTableAsync();
+
         var task = await GetTaskAsync(taskId);
         var vendorComment = task?.Notes ?? string.Empty;
         var sql = @"select submission_id, planner_id, vendor_id, candidate_name, contact_detail, visa_type, resume_file, candidate_status, is_submitted, created_on, updated_on from planner_candidate_submission where planner_id = @planner_id";
@@ -432,6 +600,8 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
 
     public async Task SaveVendorSubmissionsAsync(int taskId, int vendorId, SaveVendorCandidatesRequest request, string performedBy)
     {
+        await EnsurePlannerCandidateSubmissionTableAsync();
+
         var task = await GetTaskAsync(taskId) ?? throw new InvalidOperationException("Task not found.");
         task.Timeline.Add(new TaskTimelineItem
         {
@@ -476,6 +646,36 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
             await upd.ExecuteNonQueryAsync();
         }
         await tx.CommitAsync();
+    }
+
+    private async Task EnsurePlannerCandidateSubmissionTableAsync()
+    {
+        const string sql = @"
+            CREATE TABLE IF NOT EXISTS planner_candidate_submission (
+                submission_id SERIAL PRIMARY KEY,
+                planner_id INT NOT NULL REFERENCES planner_task(id) ON DELETE CASCADE,
+                vendor_id INT NOT NULL REFERENCES vendor(vendor_id),
+                candidate_name VARCHAR(255) NOT NULL DEFAULT '',
+                contact_detail VARCHAR(255) NOT NULL DEFAULT '',
+                visa_type VARCHAR(100) NOT NULL DEFAULT '',
+                resume_file VARCHAR(255) NOT NULL DEFAULT '',
+                candidate_status VARCHAR(50) NOT NULL DEFAULT 'Draft',
+                is_submitted BOOLEAN NOT NULL DEFAULT FALSE,
+                created_on TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_on TIMESTAMP NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_planner_candidate_submission_planner
+                ON planner_candidate_submission(planner_id);
+
+            CREATE INDEX IF NOT EXISTS idx_planner_candidate_submission_vendor
+                ON planner_candidate_submission(vendor_id);
+        ";
+
+        await using var conn = CreateConnection();
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        await cmd.ExecuteNonQueryAsync();
     }
 
     private async Task<IReadOnlyList<T>> ReadListAsync<T>(string sql, Func<IDataRecord, T> mapper)
@@ -661,6 +861,75 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
         if (match.Success && DateTime.TryParse(match.Groups[1].Value, out var dt))
             return dt;
         return null;
+    }
+
+    private static string FirstNonEmpty(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+                return value.Trim();
+        }
+        return string.Empty;
+    }
+
+    private static int ParseIntOrDefault(string? value, int defaultValue)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return defaultValue;
+        var match = Regex.Match(value, @"\d+");
+        return match.Success && int.TryParse(match.Value, out var parsed) ? parsed : defaultValue;
+    }
+
+    private static DateTime ParseDateOrDefault(string? value, DateTime defaultValue)
+    {
+        if (!string.IsNullOrWhiteSpace(value) && DateTime.TryParse(value, out var parsed))
+            return parsed;
+        return defaultValue;
+    }
+
+    private static string ExtractEmail(string value)
+    {
+        var match = Regex.Match(value ?? string.Empty, @"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", RegexOptions.IgnoreCase);
+        return match.Success ? match.Value : (string.IsNullOrWhiteSpace(value) ? "internal@dbiz.com" : value.Trim());
+    }
+
+    private static string ExtractPhone(string value)
+    {
+        var match = Regex.Match(value ?? string.Empty, @"(?:\+?\d[\d\s\-()]{6,}\d)");
+        return match.Success ? match.Value.Trim() : string.Empty;
+    }
+
+    private static List<string> ExtractGapsFromAnalysis(string analysis)
+    {
+        var gaps = new List<string>();
+        if (string.IsNullOrWhiteSpace(analysis))
+            return gaps;
+
+        var capture = false;
+        foreach (var rawLine in analysis.Replace("\r", string.Empty).Split('\n'))
+        {
+            var line = rawLine.Trim();
+            if (line.Length == 0)
+                continue;
+
+            if (line.Contains("Gaps", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("Missing", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("Clarification", StringComparison.OrdinalIgnoreCase))
+            {
+                capture = true;
+                continue;
+            }
+
+            if (capture && Regex.IsMatch(line, @"^\d+\s*[).]|^[-*•]") )
+            {
+                var cleaned = Regex.Replace(line, @"^(\d+\s*[).]|[-*•])\s*", "").Trim();
+                if (!string.IsNullOrWhiteSpace(cleaned))
+                    gaps.Add(cleaned);
+            }
+        }
+
+        return gaps.Distinct(StringComparer.OrdinalIgnoreCase).Take(20).ToList();
     }
 
     private static async Task<List<int>> FindRecommendedCandidateIdsAsync(

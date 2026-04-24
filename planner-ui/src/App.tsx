@@ -2,7 +2,6 @@
 import { NavLink, Route, Routes, useNavigate } from 'react-router-dom';
 import { DashboardPage } from './pages/DashboardPage';
 import { TaskDetailPage } from './pages/TaskDetailPage';
-import { RulesPage } from './pages/RulesPage';
 import { VendorsPage } from './pages/VendorsPage';
 import { CandidatesPage } from './pages/CandidatesPage';
 import { MailboxPage } from './pages/MailboxPage';
@@ -24,7 +23,7 @@ function Shell() {
         <nav className="nav-links">
           <NavLink to="/">Dashboard</NavLink>
           <NavLink to="/planners">Task List</NavLink>
-          {!isVendor && <><NavLink to="/mailbox">Mailbox</NavLink><NavLink to="/rules">Rules</NavLink><NavLink to="/vendors">Vendors</NavLink><NavLink to="/candidates">Candidates</NavLink></>}
+          {!isVendor && <><NavLink to="/mailbox">Mailbox</NavLink><NavLink to="/vendors">Vendors</NavLink><NavLink to="/candidates">Candidates</NavLink></>}
           {session?.roleCode === 'SUPER_ADMIN' && <NavLink to="/admin/users">Users</NavLink>}
         </nav>
         <div className="session-block"><small>{session?.email}</small><strong>{session?.roleCode?.replace('_', ' ')}</strong><button className="secondary-btn" onClick={() => { clearSession(); navigate('/login'); }}>Logout</button></div>
@@ -34,7 +33,7 @@ function Shell() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/planners" element={<PlannerListPage />} />
           <Route path="/tasks/:id" element={<TaskDetailPage />} />
-          {!isVendor && <><Route path="/mailbox" element={<MailboxPage />} /><Route path="/rules" element={<RulesPage />} /><Route path="/vendors" element={<VendorsPage />} /><Route path="/candidates" element={<CandidatesPage />} /></>}
+          {!isVendor && <><Route path="/mailbox" element={<MailboxPage />} /><Route path="/vendors" element={<VendorsPage />} /><Route path="/candidates" element={<CandidatesPage />} /></>}
           <Route path="/admin/users" element={<ProtectedRoute roles={['SUPER_ADMIN']}><UsersPage /></ProtectedRoute>} />
         </Routes>
       </main>

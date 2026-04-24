@@ -20,8 +20,13 @@ export function LoginPage() {
       navigate('/');
     } catch (err: any) {
       const msg = err?.message || 'Login failed';
-      if (msg.includes('First-time activation')) setError('First-time activation required. Use the activation link from your email.');
-      else setError(msg);
+      let display = msg;
+      try {
+        const parsed = JSON.parse(msg) as { message?: unknown };
+        if (parsed && typeof parsed === 'object' && typeof parsed.message === 'string') display = parsed.message;
+      } catch { }
+      if (display.includes('First-time activation')) setError('First-time activation required. Use the activation link from your email.');
+      else setError(display);
     } finally {
       setSaving(false);
     }
