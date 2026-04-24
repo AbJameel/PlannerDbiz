@@ -87,3 +87,17 @@ export type MailboxItem = {
   isRead: boolean;
   sourceType: string;
 };
+
+export type VendorCandidateSubmission = {
+  submissionId: number;
+  plannerId: number;
+  vendorId: number;
+  candidateName: string;
+  contactDetail: string;
+  visaType: string;
+  resumeFile: string;
+  candidateStatus: string;
+  isSubmitted: boolean;
+  createdOn: string;
+  updatedOn?: string | null;
+};

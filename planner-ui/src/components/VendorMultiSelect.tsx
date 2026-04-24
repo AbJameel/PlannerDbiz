@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-type VendorOption = {
+export type VendorOption = {
   id: number;
   name: string;
   coverageRoles: string;
@@ -13,31 +13,33 @@ type VendorMultiSelectProps = {
   vendors: VendorOption[];
   selectedVendorIds: number[];
   onChange: (ids: number[]) => void;
+  placeholder?: string;
 };
 
 export function VendorMultiSelect({
   vendors,
   selectedVendorIds,
-  onChange
+  onChange,
+  placeholder = 'Search and select vendors...'
 }: VendorMultiSelectProps) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
+    function handleOutside(event: MouseEvent) {
       if (!wrapperRef.current) return;
       if (!wrapperRef.current.contains(event.target as Node)) {
         setOpen(false);
       }
     }
 
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
   }, []);
 
   const activeVendors = useMemo(
-    () => vendors.filter((v) => v.status?.toLowerCase() !== 'inactive'),
+    () => vendors.filter((v) => (v.status || '').toLowerCase() !== 'inactive'),
     [vendors]
   );
 
@@ -58,8 +60,9 @@ export function VendorMultiSelect({
     );
   }, [activeVendors, query]);
 
-  const selectedVendors = activeVendors.filter((v) =>
-    selectedVendorIds.includes(v.id)
+  const selectedVendors = useMemo(
+    () => activeVendors.filter((v) => selectedVendorIds.includes(v.id)),
+    [activeVendors, selectedVendorIds]
   );
 
   function toggleVendor(id: number) {
@@ -82,7 +85,7 @@ export function VendorMultiSelect({
       >
         <div className="selected-tags">
           {selectedVendors.length === 0 ? (
-            <span className="placeholder">Search and select vendors...</span>
+            <span className="placeholder">{placeholder}</span>
           ) : (
             selectedVendors.map((vendor) => (
               <span key={vendor.id} className="selected-tag">
@@ -104,14 +107,14 @@ export function VendorMultiSelect({
 
         <input
           type="text"
+          className="vendor-search-input"
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
             setOpen(true);
           }}
           onFocus={() => setOpen(true)}
-          placeholder={selectedVendors.length > 0 ? '' : 'Search and select vendors...'}
-          className="vendor-search-input"
+          placeholder={selectedVendors.length > 0 ? '' : placeholder}
         />
       </div>
 
@@ -124,14 +127,16 @@ export function VendorMultiSelect({
               const selected = selectedVendorIds.includes(vendor.id);
 
               return (
-                <label
+                <div
                   key={vendor.id}
                   className={`vendor-option ${selected ? 'selected' : ''}`}
+                  onClick={() => toggleVendor(vendor.id)}
                 >
                   <input
                     type="checkbox"
                     checked={selected}
                     onChange={() => toggleVendor(vendor.id)}
+                    onClick={(e) => e.stopPropagation()}
                   />
                   <div className="vendor-option-content">
                     <strong>{vendor.name}</strong>
@@ -140,7 +145,7 @@ export function VendorMultiSelect({
                       Budget {vendor.budgetMin} - {vendor.budgetMax}
                     </small>
                   </div>
-                </label>
+                </div>
               );
             })
           )}

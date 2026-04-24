@@ -9,6 +9,10 @@ public sealed class WorkerOptions
     public bool OnlyUnread { get; set; } = true;
     public bool MarkAsReadAfterProcessing { get; set; } = false;
     public string ProcessedStateFilePath { get; set; } = "Data/processed-state.json";
+    public string AttachmentDownloadFolderPath { get; set; } = "Data/Attachments";
+    public int MaxAttachmentTextLength { get; set; } = 20000;
+    public int MaxBodyTextLength { get; set; } = 20000;
+    public string FallbackMailJsonPath { get; set; } = "Models/output_mail.json";
 
     public void Validate()
     {
@@ -20,5 +24,8 @@ public sealed class WorkerOptions
 
         if (string.IsNullOrWhiteSpace(ProcessedStateFilePath))
             throw new InvalidOperationException("Worker:ProcessedStateFilePath is required.");
+
+        if (string.IsNullOrWhiteSpace(AttachmentDownloadFolderPath))
+            throw new InvalidOperationException("Worker:AttachmentDownloadFolderPath is required.");
     }
 }

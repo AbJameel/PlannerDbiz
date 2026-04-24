@@ -30,8 +30,8 @@ export function ReviewQueuePage() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    api.getTasks()
-      .then((data) => {
+    api.getReviewQueue()
+      .then((data: unknown) => {
         if (cancelled) return;
         setTasks(data as PlannerTask[]);
       })

@@ -1,15 +1,27 @@
-using Microsoft.Graph;
+using Azure.Identity;
+using Dbiz.MailboxWorker.Options;
+using Microsoft.Extensions.Options;
 
 namespace Dbiz.MailboxWorker.Services;
 
-public sealed class GraphClientFactory : IGraphClientFactory
+public sealed class DbizGraphClientFactory : IGraphClientFactory
 {
-    private readonly GraphServiceClient _graphServiceClient;
+    private readonly GraphOptions _options;
 
-    public GraphClientFactory(GraphServiceClient graphServiceClient)
+    public DbizGraphClientFactory(IOptions<GraphOptions> options)
     {
-        _graphServiceClient = graphServiceClient;
+        _options = options.Value;
     }
 
-    public GraphServiceClient CreateClient() => _graphServiceClient;
+    public Microsoft.Graph.GraphServiceClient CreateClient()
+    {
+        _options.ValidateWhenEnabled();
+
+        var credential = new ClientSecretCredential(
+            _options.TenantId,
+            _options.ClientId,
+            _options.ClientSecret);
+
+        return new Microsoft.Graph.GraphServiceClient(credential, _options.Scopes);
+    }
 }

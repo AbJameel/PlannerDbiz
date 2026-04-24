@@ -396,6 +396,88 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
         return Convert.ToInt32(await cmd.ExecuteScalarAsync());
     }
 
+    public async Task<(string VendorComment, IReadOnlyList<VendorCandidateSubmission> Items)> GetVendorSubmissionsAsync(int taskId, int? vendorId = null)
+    {
+        var task = await GetTaskAsync(taskId);
+        var vendorComment = task?.Notes ?? string.Empty;
+        var sql = @"select submission_id, planner_id, vendor_id, candidate_name, contact_detail, visa_type, resume_file, candidate_status, is_submitted, created_on, updated_on from planner_candidate_submission where planner_id = @planner_id";
+        if (vendorId.HasValue) sql += " and vendor_id = @vendor_id";
+        sql += " order by submission_id;";
+        var items = new List<VendorCandidateSubmission>();
+        await using var conn = CreateConnection();
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("planner_id", taskId);
+        if (vendorId.HasValue) cmd.Parameters.AddWithValue("vendor_id", vendorId.Value);
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            items.Add(new VendorCandidateSubmission
+            {
+                SubmissionId = reader.GetInt32(0),
+                PlannerId = reader.GetInt32(1),
+                VendorId = reader.GetInt32(2),
+                CandidateName = reader.GetString(3),
+                ContactDetail = reader.GetString(4),
+                VisaType = reader.GetString(5),
+                ResumeFile = reader.GetString(6),
+                CandidateStatus = reader.GetString(7),
+                IsSubmitted = reader.GetBoolean(8),
+                CreatedOn = reader.GetDateTime(9),
+                UpdatedOn = reader.IsDBNull(10) ? null : reader.GetDateTime(10)
+            });
+        }
+        return (vendorComment, items);
+    }
+
+    public async Task SaveVendorSubmissionsAsync(int taskId, int vendorId, SaveVendorCandidatesRequest request, string performedBy)
+    {
+        var task = await GetTaskAsync(taskId) ?? throw new InvalidOperationException("Task not found.");
+        task.Timeline.Add(new TaskTimelineItem
+        {
+            HappenedOn = DateTime.UtcNow,
+            Title = request.Submit ? "Vendor submitted candidates" : "Vendor saved draft",
+            Description = request.Submit ? "Vendor submitted candidate list for recruiter review." : "Vendor saved candidate draft.",
+            PerformedBy = performedBy
+        });
+
+        await using var conn = CreateConnection();
+        await conn.OpenAsync();
+        await using var tx = await conn.BeginTransactionAsync();
+        const string deleteSql = "delete from planner_candidate_submission where planner_id = @planner_id and vendor_id = @vendor_id and is_submitted = false;";
+        await using (var del = new NpgsqlCommand(deleteSql, conn, tx))
+        {
+            del.Parameters.AddWithValue("planner_id", taskId);
+            del.Parameters.AddWithValue("vendor_id", vendorId);
+            await del.ExecuteNonQueryAsync();
+        }
+        const string insSql = @"insert into planner_candidate_submission (planner_id, vendor_id, candidate_name, contact_detail, visa_type, resume_file, candidate_status, is_submitted, created_on, updated_on)
+                                values (@planner_id,@vendor_id,@candidate_name,@contact_detail,@visa_type,@resume_file,@candidate_status,@is_submitted, now(), now());";
+        foreach (var item in request.Items)
+        {
+            await using var ins = new NpgsqlCommand(insSql, conn, tx);
+            ins.Parameters.AddWithValue("planner_id", taskId);
+            ins.Parameters.AddWithValue("vendor_id", vendorId);
+            ins.Parameters.AddWithValue("candidate_name", item.CandidateName ?? string.Empty);
+            ins.Parameters.AddWithValue("contact_detail", item.ContactDetail ?? string.Empty);
+            ins.Parameters.AddWithValue("visa_type", item.VisaType ?? string.Empty);
+            ins.Parameters.AddWithValue("resume_file", item.ResumeFile ?? string.Empty);
+            ins.Parameters.AddWithValue("candidate_status", request.Submit ? "Submitted" : "Draft");
+            ins.Parameters.AddWithValue("is_submitted", request.Submit);
+            await ins.ExecuteNonQueryAsync();
+        }
+        const string updTask = @"update planner_task set notes = @notes, status = @status, timeline_json = @timeline_json::jsonb where id = @id;";
+        await using (var upd = new NpgsqlCommand(updTask, conn, tx))
+        {
+            upd.Parameters.AddWithValue("notes", request.VendorComment ?? string.Empty);
+            upd.Parameters.AddWithValue("status", request.Submit ? "Vendor Submitted" : task.Status);
+            upd.Parameters.AddWithValue("timeline_json", JsonSerializer.Serialize(task.Timeline));
+            upd.Parameters.AddWithValue("id", taskId);
+            await upd.ExecuteNonQueryAsync();
+        }
+        await tx.CommitAsync();
+    }
+
     private async Task<IReadOnlyList<T>> ReadListAsync<T>(string sql, Func<IDataRecord, T> mapper)
     {
         await using var conn = CreateConnection();
@@ -607,5 +689,136 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
         }
         await reader.CloseAsync();
         return recommended.OrderByDescending(x => x.Score).ThenBy(x => x.Id).Take(5).Select(x => x.Id).ToList();
+    }
+
+    public async Task<(IReadOnlyList<PlannerListItem> Items, int TotalCount)> GetPlannerListAsync(
+    string? status,
+    string? priority,
+    string? search,
+    string? role,
+    string? clientName,
+    bool? closingToday,
+    string? userRole,
+    int? vendorId,
+    string? slaDate)
+    {
+        var sql = """
+        SELECT
+            p.id,
+            p.planner_no,
+            p.client_name,
+            COALESCE(p.requirement_title, '') AS requirement_title,
+            p.role,
+            p.status,
+            p.priority,
+            p.budget,
+            p.currency,
+            p.sla_date,
+            p.open_positions
+        FROM planner_task p
+        WHERE 1 = 1
+        """;
+
+        var parameters = new Dictionary<string, object?>();
+
+        if (userRole == "VENDOR" && vendorId.HasValue)
+        {
+            sql += """
+            AND EXISTS (
+                SELECT 1
+                FROM planner_vendor_assignment va
+                WHERE va.planner_id = p.id
+                  AND va.vendor_id = @vendorId
+            )
+            """;
+            parameters["vendorId"] = vendorId.Value;
+        }
+
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            sql += " AND p.status = @status ";
+            parameters["status"] = status;
+        }
+
+        if (!string.IsNullOrWhiteSpace(priority))
+        {
+            sql += " AND p.priority = @priority ";
+            parameters["priority"] = priority;
+        }
+
+        if (!string.IsNullOrWhiteSpace(role))
+        {
+            sql += " AND LOWER(p.role) LIKE LOWER(@role) ";
+            parameters["role"] = $"%{role}%";
+        }
+
+        if (!string.IsNullOrWhiteSpace(clientName))
+        {
+            sql += " AND LOWER(p.client_name) LIKE LOWER(@clientName) ";
+            parameters["clientName"] = $"%{clientName}%";
+        }
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            sql += " AND LOWER(COALESCE(p.requirement_asked, '')) LIKE LOWER(@search) ";
+            parameters["search"] = $"%{search}%";
+        }
+
+        if (!string.IsNullOrWhiteSpace(slaDate))
+        {
+            sql += " AND DATE(p.sla_date) = DATE(@slaDate) ";
+            parameters["slaDate"] = slaDate;
+        }
+
+        if (closingToday == true)
+        {
+            sql += " AND DATE(p.sla_date) = CURRENT_DATE ";
+        }
+
+        sql += " ORDER BY p.received_on DESC ";
+
+        var items = await ReadListAsync(sql, reader => new PlannerListItem
+        {
+            Id = reader.GetInt32(0),
+            PlannerNo = reader.GetString(1),
+            ClientName = reader.GetString(2),
+            RequirementTitle = reader.GetString(3),
+            Role = reader.GetString(4),
+            Status = reader.GetString(5),
+            Priority = reader.GetString(6),
+            Budget = reader.GetDecimal(7),
+            Currency = reader.GetString(8),
+            SlaDate = reader.GetDateTime(9),
+            OpenPositions = reader.GetInt32(10)
+        }, parameters);
+
+        return (items, items.Count);
+    }
+
+    private async Task<List<T>> ReadListAsync<T>(
+      string sql,
+      Func<NpgsqlDataReader, T> map,
+      Dictionary<string, object?> parameters)
+    {
+        var result = new List<T>();
+
+        await using var conn = new NpgsqlConnection(_connectionString);
+        await conn.OpenAsync();
+
+        await using var cmd = new NpgsqlCommand(sql, conn);
+
+        foreach (var p in parameters)
+        {
+            cmd.Parameters.AddWithValue(p.Key, p.Value ?? DBNull.Value);
+        }
+
+        await using var reader = await cmd.ExecuteReaderAsync();
+
+        while (await reader.ReadAsync())
+        {
+            result.Add(map(reader));
+        }
+
+        return result;
     }
 }

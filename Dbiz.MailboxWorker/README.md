@@ -1,68 +1,59 @@
 # DBiz Mailbox Worker (.NET 8 Worker Service)
 
-This sample worker polls an Outlook mailbox using Microsoft Graph app-only authentication and logs new messages from the Inbox.
+This worker reads unread emails from Inbox using Microsoft Graph, downloads attachments, extracts JD text from supported attachments, and posts a planner-create payload to your own API.
 
-## What it does
-- Connects to Microsoft Graph using **ClientSecretCredential**
-- Reads messages from a configured mailbox and folder
-- Filters to unread messages by default
-- Keeps a simple local processed-state file so the same message is not handled twice
-- Optionally marks messages as read after successful processing
-- Leaves clear TODO hooks where you can create planner tasks in your own database
+## Flow
+1. Read unread Inbox mails
+2. Load the full message body
+3. Download file attachments
+4. Extract text from supported files (`.pdf`, `.docx`, `.txt`, `.csv`, `.html`)
+5. Pick JD text from the best matching attachment, otherwise fall back to email body
+6. POST a planner-create request to your planner API
+7. Optionally mark the mail as read after successful processing
 
-## Required Microsoft Graph setup
-Use **application permissions** for a background service.
+## Supported attachment text extraction
+- PDF
+- DOCX
+- TXT / CSV / LOG / JSON / XML
+- HTML / HTM
 
-Minimum recommended Graph permission:
+## Required Microsoft Graph permissions
+Use application permissions for a worker/background service.
+
+Minimum:
 - `Mail.Read`
 
-If you want the worker to mark processed mails as read, also add:
+Also add this if you want to mark processed emails as read:
 - `Mail.ReadWrite`
 
-If you want to create or send drafts later, also add:
-- `Mail.Send`
+Admin consent is required.
 
-After adding permissions, your admin must grant **admin consent**.
+## Config
+Update `appsettings.json`.
 
-## Required values from admin team
-- Tenant ID
-- App / Client ID
-- Client Secret
-- Mailbox address to monitor (user mailbox or shared mailbox)
-- Confirmed Graph application permissions with admin consent
+### Graph section
+- `MailboxAddress`: mailbox or shared mailbox to monitor
+- `MailFolderId`: usually `Inbox`
 
-## Configure the app
-Update `appsettings.json`:
+### PlannerApi section
+- `Enabled`: set `true` to call your planner API
+- `BaseUrl`: planner API base URL
+- `CreatePlannerPath`: relative endpoint path
+- `ApiKey` or `BearerToken`: use whichever your planner API expects
 
-```json
-{
-  "Graph": {
-    "TenantId": "YOUR-TENANT-ID",
-    "ClientId": "YOUR-APP-CLIENT-ID",
-    "ClientSecret": "YOUR-APP-CLIENT-SECRET",
-    "MailboxAddress": "planner@yourcompany.com",
-    "MailFolderId": "Inbox"
-  }
-}
-```
-
-## Run locally
-```bash
-dotnet restore
-dotnet run
-```
-
-## Install as Windows Service later
-This project already includes `Microsoft.Extensions.Hosting.WindowsServices`.
-You can publish it and register it as a Windows Service when you are ready.
-
-## Main extension points
-In `Services/MailboxReaderService.cs`, inside `HandleMessageAsync`, add your logic to:
-1. store the email
-2. extract JD / requirement details
-3. create planner/task
-4. apply rules and vendor assignment
+## Payload sent to planner API
+The worker sends a JSON payload containing:
+- mail IDs
+- subject
+- from / to / cc
+- received time
+- body preview
+- full body text
+- extracted `JobDescriptionText`
+- attachment metadata and extracted text
 
 ## Notes
-- The processed-state file is only for demo purposes. In production, keep processed message IDs or Graph delta tokens in your database.
-- For large-scale mailbox sync, consider moving from simple polling to delta query / webhook strategies later.
+- `JobDescriptionText` is selected first from attachments that look like JD/requirement files.
+- If no suitable attachment text is found, the worker falls back to the email body text.
+- For image-only PDFs or image attachments, OCR is not included in this sample.
+- The processed-state JSON file is only a simple demo store. In production, keep processed IDs or delta tokens in your database.
