@@ -32,6 +32,8 @@ export function TaskDetailPage() {
   const [vendorComment, setVendorComment] = useState('');
   const [submissions, setSubmissions] = useState<VendorCandidateSubmission[]>([]);
   const [activeTab, setActiveTab] = useState<'edit' | 'history'>('edit');
+  const tabButtonClass = (tab: 'edit' | 'history') =>
+    activeTab === tab ? 'tab-btn active' : 'tab-btn';
   const [requirementTab, setRequirementTab] = useState<'actual' | 'winnable' | 'gaps'>(
     'actual'
   );
@@ -331,14 +333,14 @@ export function TaskDetailPage() {
           <div className="tab-strip">
             <button
               type="button"
-              className={`tab-btn ${activeTab === 'edit' ? 'active' : ''}`}
+              className={tabButtonClass('edit')}
               onClick={() => setActiveTab('edit')}
             >
               Edit
             </button>
             <button
               type="button"
-              className={`tab-btn ${activeTab === 'history' ? 'active' : ''}`}
+              className={tabButtonClass('history')}
               onClick={() => setActiveTab('history')}
             >
               History
