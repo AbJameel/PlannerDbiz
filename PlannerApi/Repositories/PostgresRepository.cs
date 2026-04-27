@@ -157,7 +157,7 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
             order by received_on desc;", MapTask, new Dictionary<string, object?> { ["vendor_id"] = vendorId });
 
     public Task<IReadOnlyList<VendorCandidateSubmission>> GetSubmittedCandidatesForVendorAsync(int vendorId) => ReadListAsync(@"
-            select submission_id, planner_id, vendor_id, candidate_name, contact_detail, visa_type, resume_file, candidate_status, is_submitted, created_on, updated_on
+            select submission_id, planner_id, vendor_id, candidate_name, contact_detail, visa_type, resume_file, dbiz_resume_file, candidate_status, is_submitted, created_on, updated_on
             from planner_candidate_submission
             where vendor_id = @vendor_id and is_submitted = true
             order by created_on desc, submission_id desc;", MapVendorCandidateSubmission, new Dictionary<string, object?> { ["vendor_id"] = vendorId });
@@ -496,16 +496,31 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
         return Convert.ToInt32(await cmd.ExecuteScalarAsync());
     }
 
-    public async Task<(string VendorComment, IReadOnlyList<VendorCandidateSubmission> Items)> GetVendorSubmissionsAsync(int taskId, int? vendorId = null)
+    public async Task<(string VendorComment, string AssignmentNote, IReadOnlyList<VendorCandidateSubmission> Items)> GetVendorSubmissionsAsync(int taskId, int? vendorId = null)
     {
         var task = await GetTaskAsync(taskId);
         var vendorComment = task?.VendorComment ?? string.Empty;
-        var sql = @"select submission_id, planner_id, vendor_id, candidate_name, contact_detail, visa_type, resume_file, candidate_status, is_submitted, created_on, updated_on from planner_candidate_submission where planner_id = @planner_id";
+        var assignmentNote = string.Empty;
+        var sql = @"select submission_id, planner_id, vendor_id, candidate_name, contact_detail, visa_type, resume_file, dbiz_resume_file, candidate_status, is_submitted, created_on, updated_on from planner_candidate_submission where planner_id = @planner_id";
         if (vendorId.HasValue) sql += " and vendor_id = @vendor_id";
         sql += " order by submission_id;";
         var items = new List<VendorCandidateSubmission>();
         await using var conn = CreateConnection();
         await conn.OpenAsync();
+
+        if (vendorId.HasValue)
+        {
+            const string noteSql = @"select coalesce(assignment_note, '') from planner_vendor_assignment 
+                                     where planner_id = @planner_id and vendor_id = @vendor_id
+                                     order by assigned_on desc
+                                     limit 1;";
+            await using var noteCmd = new NpgsqlCommand(noteSql, conn);
+            noteCmd.Parameters.AddWithValue("planner_id", taskId);
+            noteCmd.Parameters.AddWithValue("vendor_id", vendorId.Value);
+            var noteObj = await noteCmd.ExecuteScalarAsync();
+            assignmentNote = noteObj?.ToString() ?? string.Empty;
+        }
+
         await using var cmd = new NpgsqlCommand(sql, conn);
         cmd.Parameters.AddWithValue("planner_id", taskId);
         if (vendorId.HasValue) cmd.Parameters.AddWithValue("vendor_id", vendorId.Value);
@@ -521,13 +536,14 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
                 ContactDetail = reader.GetString(4),
                 VisaType = reader.GetString(5),
                 ResumeFile = reader.GetString(6),
-                CandidateStatus = reader.GetString(7),
-                IsSubmitted = reader.GetBoolean(8),
-                CreatedOn = reader.GetDateTime(9),
-                UpdatedOn = reader.IsDBNull(10) ? null : reader.GetDateTime(10)
+                DbizResumeFile = reader.GetString(7),
+                CandidateStatus = reader.GetString(8),
+                IsSubmitted = reader.GetBoolean(9),
+                CreatedOn = reader.GetDateTime(10),
+                UpdatedOn = reader.IsDBNull(11) ? null : reader.GetDateTime(11)
             });
         }
-        return (vendorComment, items);
+        return (vendorComment, assignmentNote, items);
     }
 
     public async Task SaveVendorSubmissionsAsync(int taskId, int vendorId, SaveVendorCandidatesRequest request, string performedBy)
@@ -551,8 +567,8 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
             del.Parameters.AddWithValue("vendor_id", vendorId);
             await del.ExecuteNonQueryAsync();
         }
-        const string insSql = @"insert into planner_candidate_submission (planner_id, vendor_id, candidate_name, contact_detail, visa_type, resume_file, candidate_status, is_submitted, created_on, updated_on)
-                                values (@planner_id,@vendor_id,@candidate_name,@contact_detail,@visa_type,@resume_file,@candidate_status,@is_submitted, now(), now());";
+        const string insSql = @"insert into planner_candidate_submission (planner_id, vendor_id, candidate_name, contact_detail, visa_type, resume_file, dbiz_resume_file, candidate_status, is_submitted, created_on, updated_on)
+                                values (@planner_id,@vendor_id,@candidate_name,@contact_detail,@visa_type,@resume_file,@dbiz_resume_file,@candidate_status,@is_submitted, now(), now());";
         foreach (var item in request.Items)
         {
             await using var ins = new NpgsqlCommand(insSql, conn, tx);
@@ -562,6 +578,7 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
             ins.Parameters.AddWithValue("contact_detail", item.ContactDetail ?? string.Empty);
             ins.Parameters.AddWithValue("visa_type", item.VisaType ?? string.Empty);
             ins.Parameters.AddWithValue("resume_file", item.ResumeFile ?? string.Empty);
+            ins.Parameters.AddWithValue("dbiz_resume_file", item.DbizResumeFile ?? string.Empty);
             ins.Parameters.AddWithValue("candidate_status", request.Submit ? "Submitted" : "Draft");
             ins.Parameters.AddWithValue("is_submitted", request.Submit);
             await ins.ExecuteNonQueryAsync();
@@ -725,7 +742,7 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
 
         const string insertSql = @"
             insert into planner_contact (planner_id, name, title, email, phone, agency, contact_level, is_primary)
-            values (@planner_id, @name, @title, @email, @phone, @agency, @is_primary);";
+            values (@planner_id, @name, @title, @email, @phone, @agency, @contact_level, @is_primary);";
 
         foreach (var contact in normalized)
         {
@@ -863,10 +880,11 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
         ContactDetail = record.GetString(4),
         VisaType = record.GetString(5),
         ResumeFile = record.GetString(6),
-        CandidateStatus = record.GetString(7),
-        IsSubmitted = record.GetBoolean(8),
-        CreatedOn = record.GetDateTime(9),
-        UpdatedOn = record.IsDBNull(10) ? null : record.GetDateTime(10)
+        DbizResumeFile = record.GetString(7),
+        CandidateStatus = record.GetString(8),
+        IsSubmitted = record.GetBoolean(9),
+        CreatedOn = record.GetDateTime(10),
+        UpdatedOn = record.IsDBNull(11) ? null : record.GetDateTime(11)
     };
 
     private static MailboxItem MapMailbox(IDataRecord record) => new() { Id = record.GetInt32(0), Subject = record.GetString(1), FromEmail = record.GetString(2), ReceivedOn = record.GetDateTime(3), Snippet = record.GetString(4), IsRead = record.GetBoolean(5), SourceType = record.GetString(6) };
