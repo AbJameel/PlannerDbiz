@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS planner_candidate_submission (
     candidate_skills TEXT NOT NULL DEFAULT '',
     visa_type VARCHAR(100) NOT NULL DEFAULT '',
     resume_file VARCHAR(255) NOT NULL DEFAULT '',
+    dbiz_resume_file VARCHAR(255) NOT NULL DEFAULT '',
     candidate_status VARCHAR(50) NOT NULL DEFAULT 'Draft',
     is_submitted BOOLEAN NOT NULL DEFAULT FALSE,
     created_on TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -18,6 +19,7 @@ CREATE TABLE IF NOT EXISTS planner_candidate_submission (
 
 ALTER TABLE planner_candidate_submission ADD COLUMN IF NOT EXISTS contact_name VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE planner_candidate_submission ADD COLUMN IF NOT EXISTS candidate_skills TEXT NOT NULL DEFAULT '';
+ALTER TABLE planner_candidate_submission ADD COLUMN IF NOT EXISTS dbiz_resume_file VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE planner_candidate_submission ADD COLUMN IF NOT EXISTS updated_on TIMESTAMP NULL;
 
 CREATE INDEX IF NOT EXISTS idx_planner_candidate_submission_planner

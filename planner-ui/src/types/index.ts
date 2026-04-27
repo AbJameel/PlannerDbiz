@@ -121,6 +121,7 @@ export type VendorCandidateSubmission = {
   contactDetail: string;
   visaType: string;
   resumeFile: string;
+  dbizResumeFile?: string;
   candidateStatus: string;
   isSubmitted: boolean;
   createdOn: string;

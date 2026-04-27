@@ -31,8 +31,12 @@ export function TaskDetailPage() {
   const [allVendors, setAllVendors] = useState<Vendor[]>([]);
   const [vendorIds, setVendorIds] = useState<number[]>([]);
   const [vendorComment, setVendorComment] = useState('');
+  const [assignmentNote, setAssignmentNote] = useState('');
+  const [assignmentNoteDraft, setAssignmentNoteDraft] = useState('');
   const [submissions, setSubmissions] = useState<VendorCandidateSubmission[]>([]);
-  const [activeTab, setActiveTab] = useState<'edit' | 'contacts' | 'history'>('edit');
+  const [activeTab, setActiveTab] = useState<
+    'edit' | 'contacts' | 'history' | 'vendorCandidates'
+  >('edit');
   const [requirementTab, setRequirementTab] = useState<'actual' | 'winnable' | 'gaps'>(
     'actual'
   );
@@ -74,9 +78,11 @@ export function TaskDetailPage() {
       if (isVendor) {
         const vendorData = (await api.getVendorSubmissions(id)) as {
           vendorComment: string;
+          assignmentNote?: string;
           items: VendorCandidateSubmission[];
         };
         setVendorComment(vendorData.vendorComment ?? '');
+        setAssignmentNote(vendorData.assignmentNote ?? '');
         setSubmissions(vendorData.items ?? []);
       } else {
         const [candidateData, vendorData, allVendorData, vendorSubmissionData] =
@@ -93,8 +99,10 @@ export function TaskDetailPage() {
 
         const allSubs = vendorSubmissionData as {
           vendorComment: string;
+          assignmentNote?: string;
           items: VendorCandidateSubmission[];
         };
+        setAssignmentNote(allSubs.assignmentNote ?? '');
         setSubmissions(allSubs.items ?? []);
       }
     } catch (err) {
@@ -241,7 +249,7 @@ export function TaskDetailPage() {
 
       await api.assignVendors(task.id, {
         vendorIds,
-        assignmentNote: 'Assigned after recruiter review.',
+        assignmentNote: assignmentNoteDraft.trim(),
         updateStatusTo: 'Assigned to Vendor'
       });
 
@@ -299,6 +307,42 @@ export function TaskDetailPage() {
   const vendorSubmitted = isVendor
     ? submissions.some((item) => item.isSubmitted)
     : task.status === 'Vendor Submitted';
+
+  const hasVendorCandidates = (submissions ?? []).some(
+    (s) =>
+      Boolean(s.candidateName?.trim()) ||
+      Boolean(s.contactDetail?.trim()) ||
+      Boolean(s.resumeFile?.trim()) ||
+      Boolean(s.dbizResumeFile?.trim())
+  );
+
+  const assignedIds = vendorIds.length > 0 ? vendorIds : task.assignedVendorIds ?? [];
+  const statusText = (task.status ?? '').toLowerCase();
+  const isAssignedToVendor =
+    assignedIds.length > 0 ||
+    statusText.includes('assigned') ||
+    statusText.includes('vendor submitted') ||
+    statusText.includes('submitted');
+
+  function parseContactDetail(detail: string) {
+    const text = (detail ?? '').trim();
+    if (!text) return { phone: '', email: '' };
+    const tokens = text
+      .split(/[\s,|·/]+/g)
+      .map((t) => t.trim())
+      .filter(Boolean);
+    const emailToken = tokens.find((t) => t.includes('@')) ?? '';
+    const phoneTokens = tokens.filter((t) => t !== emailToken);
+    const phone = phoneTokens.join(' ').trim();
+    return { phone, email: emailToken };
+  }
+
+  function buildContactDetail(phone: string, email: string) {
+    const p = (phone ?? '').trim();
+    const e = (email ?? '').trim();
+    if (p && e) return `${p} · ${e}`;
+    return p || e;
+  }
 
   function renderSkillChips(items: string[], emptyText: string) {
     if (!items || items.length === 0) return <p className="muted">{emptyText}</p>;
@@ -380,6 +424,15 @@ export function TaskDetailPage() {
             >
               Contacts
             </button>
+            {hasVendorCandidates && (
+              <button
+                type="button"
+                className={`tab-btn ${activeTab === 'vendorCandidates' ? 'active' : ''}`}
+                onClick={() => setActiveTab('vendorCandidates')}
+              >
+                Vendor Candidates
+              </button>
+            )}
             <button
               type="button"
               className={`tab-btn ${activeTab === 'history' ? 'active' : ''}`}
@@ -484,6 +537,65 @@ export function TaskDetailPage() {
               </p>
             )}
           </section>
+        ) : !isVendor && activeTab === 'vendorCandidates' ? (
+          <section className="editor-section history-tab-panel">
+            <h3>Vendor Candidates</h3>
+            {submissions.length === 0 ? (
+              <p className="muted">No candidates submitted yet.</p>
+            ) : (
+              <div className="table-wrap" style={{ marginTop: 12 }}>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Vendor</th>
+                      <th>Name</th>
+                      <th>Contact No</th>
+                      <th>Email</th>
+                      <th>Uploaded Resume</th>
+                      <th>DBiz Resume</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {submissions.map((item, index) => {
+                      const vendorName =
+                        allVendors.find((v) => v.id === item.vendorId)?.name ??
+                        recommendedVendors.find((v) => v.id === item.vendorId)?.name ??
+                        (item.vendorId ? String(item.vendorId) : '');
+                      const contact = parseContactDetail(item.contactDetail);
+                      const dbizResume = item.dbizResumeFile;
+
+                      return (
+                        <tr key={`${item.submissionId}-${index}`}>
+                          <td>{vendorName}</td>
+                          <td>{item.candidateName}</td>
+                          <td>{contact.phone || '—'}</td>
+                          <td>{contact.email || '—'}</td>
+                          <td>
+                            {item.resumeFile ? (
+                              <a href={item.resumeFile} target="_blank" rel="noreferrer">
+                                Download
+                              </a>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                          <td>
+                            {dbizResume ? (
+                              <a href={dbizResume} target="_blank" rel="noreferrer">
+                                Download
+                              </a>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
         ) : isVendor || activeTab === 'edit' ? (
           <div className="workspace-grid">
             <div className="editor-column">
@@ -543,7 +655,7 @@ export function TaskDetailPage() {
 
                   {!isVendor && (
                     <label className="full-span">
-                      Notes
+                      Recruiter Notes
                       <textarea
                         rows={3}
                         value={task.notes}
@@ -553,15 +665,25 @@ export function TaskDetailPage() {
                   )}
 
                   {isVendor && (
-                    <label className="full-span">
-                      Vendor Comments
-                      <textarea
-                        rows={4}
-                        value={vendorComment}
-                        disabled={vendorSubmitted}
-                        onChange={(e) => setVendorComment(e.target.value)}
-                      />
-                    </label>
+                    <>
+                      {assignmentNote.trim() && (
+                        <div className="mini-card full-span">
+                          <strong>Recruiter Note</strong>
+                          <p className="muted" style={{ margin: '6px 0 0' }}>
+                            {assignmentNote}
+                          </p>
+                        </div>
+                      )}
+                      <label className="full-span">
+                        Vendor Comments
+                        <textarea
+                          rows={4}
+                          value={vendorComment}
+                          disabled={vendorSubmitted}
+                          onChange={(e) => setVendorComment(e.target.value)}
+                        />
+                      </label>
+                    </>
                   )}
                 </div>
               </section>
@@ -765,14 +887,31 @@ export function TaskDetailPage() {
                               />
                             </label>
 
-                            <label className="full-span">
-                              Contact Details
+                            <label>
+                              Contact Mobile
                               <input
-                                value={item.contactDetail}
+                                value={parseContactDetail(item.contactDetail).phone}
                                 disabled={vendorSubmitted}
-                                onChange={(e) =>
-                                  updateSubmission(index, { contactDetail: e.target.value })
-                                }
+                                onChange={(e) => {
+                                  const current = parseContactDetail(item.contactDetail);
+                                  updateSubmission(index, {
+                                    contactDetail: buildContactDetail(e.target.value, current.email)
+                                  });
+                                }}
+                              />
+                            </label>
+
+                            <label>
+                              Email
+                              <input
+                                value={parseContactDetail(item.contactDetail).email}
+                                disabled={vendorSubmitted}
+                                onChange={(e) => {
+                                  const current = parseContactDetail(item.contactDetail);
+                                  updateSubmission(index, {
+                                    contactDetail: buildContactDetail(current.phone, e.target.value)
+                                  });
+                                }}
                               />
                             </label>
 
@@ -794,6 +933,17 @@ export function TaskDetailPage() {
                                 disabled={vendorSubmitted}
                                 onChange={(e) =>
                                   updateSubmission(index, { resumeFile: e.target.value })
+                                }
+                              />
+                            </label>
+
+                            <label>
+                              DBiz Resume File
+                              <input
+                                value={item.dbizResumeFile ?? ''}
+                                disabled={vendorSubmitted}
+                                onChange={(e) =>
+                                  updateSubmission(index, { dbizResumeFile: e.target.value })
                                 }
                               />
                             </label>
@@ -826,11 +976,20 @@ export function TaskDetailPage() {
                     selectedVendorIds={vendorIds}
                     onChange={setVendorIds}
                   />
+                  <label className="full-span" style={{ marginTop: 10, display: 'grid', gap: 6 }}>
+                    Comments to Vendor
+                    <textarea
+                      value={assignmentNoteDraft}
+                      onChange={(e) => setAssignmentNoteDraft(e.target.value)}
+                      placeholder="Add instructions or notes for the vendor..."
+                      rows={3}
+                    />
+                  </label>
                   <p className="muted">Recommended vendors appear first in the list.</p>
                 </section>
               )}
 
-              {!isVendor && (
+              {!isVendor && !isAssignedToVendor && (
                 <section className="editor-section">
                   <h3>Recommended Candidates</h3>
                   {recommendedCandidates.length === 0 ? (
@@ -850,56 +1009,6 @@ export function TaskDetailPage() {
                   )}
                 </section>
               )}
-
-              <section className="editor-section">
-                <h3>{isVendor ? 'My Candidate List' : 'Vendor Candidate List'}</h3>
-                {submissions.length === 0 ? (
-                  <p className="muted">No candidates submitted yet.</p>
-                ) : (
-                  <div className="table-scroll">
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          {!isVendor && <th>Vendor</th>}
-                          <th>Candidate</th>
-                          <th>Contact</th>
-                          <th>Visa</th>
-                          <th>Status</th>
-                          <th>Submitted</th>
-                          <th>Created</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {submissions.map((item, index) => {
-                          const vendorName =
-                            allVendors.find((v) => v.id === item.vendorId)?.name ??
-                            recommendedVendors.find((v) => v.id === item.vendorId)?.name ??
-                            (item.vendorId ? String(item.vendorId) : '');
-
-                          return (
-                            <tr key={`${item.submissionId}-${index}`}>
-                              {!isVendor && <td>{vendorName}</td>}
-                              <td>{item.candidateName}</td>
-                              <td>{item.contactDetail}</td>
-                              <td>{item.visaType}</td>
-                              <td>{item.candidateStatus}</td>
-                              <td style={{ textAlign: 'center' }}>
-                                <input
-                                  type="checkbox"
-                                  checked={item.isSubmitted}
-                                  readOnly
-                                  style={{ width: 'auto' }}
-                                />
-                              </td>
-                              <td>{new Date(item.createdOn).toLocaleString()}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </section>
             </div>
           </div>
         ) : (

@@ -10,6 +10,7 @@ public class VendorCandidateSubmission
     public string ContactDetail { get; set; } = string.Empty;
     public string VisaType { get; set; } = string.Empty;
     public string ResumeFile { get; set; } = string.Empty;
+    public string DbizResumeFile { get; set; } = string.Empty;
     public string CandidateStatus { get; set; } = "Draft";
     public bool IsSubmitted { get; set; }
     public DateTime CreatedOn { get; set; }

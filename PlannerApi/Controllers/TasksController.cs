@@ -99,7 +99,7 @@ public class TasksController : ControllerBase
         if (task is null) return NotFound();
         if (IsVendorDenied(task)) return Forbid();
         var result = await repository.GetVendorSubmissionsAsync(id, UserRole == "VENDOR" ? VendorId : null);
-        return Ok(new { vendorComment = result.VendorComment, items = result.Items });
+        return Ok(new { vendorComment = result.VendorComment, assignmentNote = result.AssignmentNote, items = result.Items });
     }
 
     [HttpPost("{id:int}/vendor-submissions")]

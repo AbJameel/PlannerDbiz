@@ -26,7 +26,7 @@ public interface IPostgresRepository
     Task<int> CreateRuleAsync(Rule rule);
     Task<int> CreateVendorAsync(Vendor vendor);
     Task<int> CreateCandidateAsync(Candidate candidate);
-    Task<(string VendorComment, IReadOnlyList<VendorCandidateSubmission> Items)> GetVendorSubmissionsAsync(int taskId, int? vendorId = null);
+    Task<(string VendorComment, string AssignmentNote, IReadOnlyList<VendorCandidateSubmission> Items)> GetVendorSubmissionsAsync(int taskId, int? vendorId = null);
     Task SaveVendorSubmissionsAsync(int taskId, int vendorId, SaveVendorCandidatesRequest request, string performedBy);
 
     Task<(IReadOnlyList<PlannerListItem> Items, int TotalCount)> GetPlannerListAsync(
