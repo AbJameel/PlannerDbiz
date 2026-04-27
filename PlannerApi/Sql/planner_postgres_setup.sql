@@ -190,3 +190,9 @@ CREATE INDEX IF NOT EXISTS idx_planner_candidate_submission_vendor ON planner_ca
 INSERT INTO app_user (user_name, full_name, email, password_hash, user_role_code, vendor_id, is_active, is_first_login, is_locked)
 VALUES ('vendor1', 'Vendor User One', 'vendor1@techsource.com', 'plain:Admin@123', 'VENDOR', 1, TRUE, FALSE, FALSE)
 ON CONFLICT (email) DO NOTHING;
+
+-- ---------------------------------------------------------------------
+-- 20260427 Full DB + API alignment patch
+-- For existing databases, run PlannerApi/Sql/20260427_full_db_api_alignment.sql.
+-- ---------------------------------------------------------------------
+\i 20260427_full_db_api_alignment.sql

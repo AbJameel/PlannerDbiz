@@ -33,8 +33,15 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
         await conn.OpenAsync();
         await using var cmd = new NpgsqlCommand(sql, conn);
         cmd.Parameters.AddWithValue("id", id);
-        await using var reader = await cmd.ExecuteReaderAsync(CommandBehavior.SingleRow);
-        return await reader.ReadAsync() ? MapTask(reader) : null;
+        PlannerTask? task = null;
+        await using (var reader = await cmd.ExecuteReaderAsync(CommandBehavior.SingleRow))
+        {
+            if (await reader.ReadAsync()) task = MapTask(reader);
+        }
+        if (task is null) return null;
+
+        task.Contacts = await ReadContactsAsync(conn, task.Id);
+        return task;
     }
 
     public Task<IReadOnlyList<Candidate>> GetCandidatesAsync() => ReadListAsync(@"
@@ -49,6 +56,12 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
 
     public Task<IReadOnlyList<Vendor>> GetVendorsAsync() => ReadListAsync(@"
             select vendor_id as id, vendor_name as name, email,
+                   coalesce(uen_no,'') as uen_no,
+                   coalesce(poc_name,'') as poc_name,
+                   coalesce(poc_email,'') as poc_email,
+                   coalesce(poc_phone,'') as poc_phone,
+                   coalesce(sourcing_location,'') as sourcing_location,
+                   coalesce(serving_location,'') as serving_location,
                    supported_roles as coverage_roles, budget_min, budget_max,
                    case when is_active then 'Active' else 'Inactive' end as status
             from vendor order by vendor_id;", MapVendor);
@@ -177,6 +190,7 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
     public async Task<int> CreateTaskAsync(string subject, string fromEmail, string body, string? sourceType = null, string? fileName = null)
     {
         var role = GuessRole(subject, body);
+        var seniorityLevel = GuessSeniorityLevel(role, body);
         var client = "DBiz Internal";
         var budget = GuessBudget(body);
         var budgetMax = budget > 0 ? budget + 1500 : (decimal?)null;
@@ -203,12 +217,12 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
 
         const string insertTask = @"
             insert into planner_task
-            (planner_no, client_name, requirement_title, role, category, priority, budget, budget_max, currency, received_on, sla_date, status, open_positions,
-             source_type, contact_name, contact_email, contact_phone, requirement_asked, notes, skills_json, secondary_skills_json, gaps_json, timeline_json,
+            (planner_no, client_name, requirement_title, role, seniority_level, category, priority, budget, budget_max, currency, received_on, sla_date, status, open_positions,
+             source_type, contact_name, contact_email, contact_phone, requirement_asked, internal_notes, vendor_comment, skills_json, secondary_skills_json, gaps_json, timeline_json,
              experience_required, location, work_mode, employment_type, recruiter_override_comment, recommended_candidate_ids_json, assigned_vendor_ids_json)
             values
-            (@planner_no, @client_name, @requirement_title, @role, @category, @priority, @budget, @budget_max, @currency, now(), @sla_date, 'New', @open_positions,
-             @source_type, @contact_name, @contact_email, @contact_phone, @requirement_asked, @notes, @skills_json::jsonb, @secondary_skills_json::jsonb, @gaps_json::jsonb, @timeline_json::jsonb,
+            (@planner_no, @client_name, @requirement_title, @role, @seniority_level, @category, @priority, @budget, @budget_max, @currency, now(), @sla_date, 'New', @open_positions,
+             @source_type, @contact_name, @contact_email, @contact_phone, @requirement_asked, @internal_notes, '', @skills_json::jsonb, @secondary_skills_json::jsonb, @gaps_json::jsonb, @timeline_json::jsonb,
              @experience_required, @location, @work_mode, @employment_type, @recruiter_override_comment, '[]'::jsonb, '[]'::jsonb)
             returning id;";
 
@@ -225,6 +239,7 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
             taskCmd.Parameters.AddWithValue("client_name", client);
             taskCmd.Parameters.AddWithValue("requirement_title", requirementTitle);
             taskCmd.Parameters.AddWithValue("role", role);
+            taskCmd.Parameters.AddWithValue("seniority_level", seniorityLevel);
             taskCmd.Parameters.AddWithValue("category", category);
             taskCmd.Parameters.AddWithValue("priority", priority);
             taskCmd.Parameters.AddWithValue("budget", budget);
@@ -237,7 +252,7 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
             taskCmd.Parameters.AddWithValue("contact_email", string.IsNullOrWhiteSpace(fromEmail) ? "internal@dbiz.com" : fromEmail);
             taskCmd.Parameters.AddWithValue("contact_phone", "");
             taskCmd.Parameters.AddWithValue("requirement_asked", Summarize(body));
-            taskCmd.Parameters.AddWithValue("notes", notes);
+            taskCmd.Parameters.AddWithValue("internal_notes", notes);
             taskCmd.Parameters.AddWithValue("skills_json", JsonSerializer.Serialize(skills));
             taskCmd.Parameters.AddWithValue("secondary_skills_json", JsonSerializer.Serialize(secondarySkills));
             taskCmd.Parameters.AddWithValue("gaps_json", JsonSerializer.Serialize(gaps));
@@ -248,6 +263,18 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
             taskCmd.Parameters.AddWithValue("employment_type", GuessEmploymentType(body));
             taskCmd.Parameters.AddWithValue("recruiter_override_comment", "");
             var taskId = Convert.ToInt32(await taskCmd.ExecuteScalarAsync());
+
+            await UpsertContactsAsync(conn, tx, taskId, new List<PlannerContact>
+            {
+                new()
+                {
+                    PlannerId = taskId,
+                    Name = "Internal Request",
+                    Email = string.IsNullOrWhiteSpace(fromEmail) ? "internal@dbiz.com" : fromEmail,
+                    Phone = string.Empty,
+                    IsPrimary = true
+                }
+            });
 
             await using var mailboxCmd = new NpgsqlCommand(insertMailbox, conn, tx);
             mailboxCmd.Parameters.AddWithValue("subject", requirementTitle);
@@ -283,6 +310,7 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
                 client_name = @client_name,
                 requirement_title = @requirement_title,
                 role = @role,
+                seniority_level = @seniority_level,
                 category = @category,
                 priority = @priority,
                 budget = @budget,
@@ -295,7 +323,7 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
                 contact_email = @contact_email,
                 contact_phone = @contact_phone,
                 requirement_asked = @requirement_asked,
-                notes = @notes,
+                internal_notes = @internal_notes,
                 skills_json = @skills_json::jsonb,
                 secondary_skills_json = @secondary_skills_json::jsonb,
                 experience_required = @experience_required,
@@ -316,13 +344,20 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
             PerformedBy = performedBy
         });
 
+        var mergedSeniorityLevel = request.SeniorityLevel ?? existing.SeniorityLevel;
+        var primaryContact = request.Contacts is { Count: > 0 }
+            ? request.Contacts.FirstOrDefault(x => x.IsPrimary) ?? request.Contacts[0]
+            : null;
+
         await using var conn = CreateConnection();
         await conn.OpenAsync();
-        await using var cmd = new NpgsqlCommand(sql, conn);
+        await using var tx = await conn.BeginTransactionAsync();
+        await using var cmd = new NpgsqlCommand(sql, conn, tx);
         cmd.Parameters.AddWithValue("id", id);
         cmd.Parameters.AddWithValue("client_name", request.ClientName);
         cmd.Parameters.AddWithValue("requirement_title", request.RequirementTitle);
         cmd.Parameters.AddWithValue("role", request.Role);
+        cmd.Parameters.AddWithValue("seniority_level", mergedSeniorityLevel ?? string.Empty);
         cmd.Parameters.AddWithValue("category", request.Category);
         cmd.Parameters.AddWithValue("priority", request.Priority);
         cmd.Parameters.AddWithValue("budget", request.Budget);
@@ -331,11 +366,11 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
         cmd.Parameters.AddWithValue("sla_date", request.SlaDate);
         cmd.Parameters.AddWithValue("status", request.Status);
         cmd.Parameters.AddWithValue("open_positions", request.OpenPositions);
-        cmd.Parameters.AddWithValue("contact_name", request.ContactName ?? "");
-        cmd.Parameters.AddWithValue("contact_email", request.ContactEmail ?? "");
-        cmd.Parameters.AddWithValue("contact_phone", request.ContactPhone ?? "");
+        cmd.Parameters.AddWithValue("contact_name", primaryContact?.Name ?? request.ContactName ?? "");
+        cmd.Parameters.AddWithValue("contact_email", primaryContact?.Email ?? request.ContactEmail ?? "");
+        cmd.Parameters.AddWithValue("contact_phone", primaryContact?.Phone ?? request.ContactPhone ?? "");
         cmd.Parameters.AddWithValue("requirement_asked", request.RequirementAsked ?? "");
-        cmd.Parameters.AddWithValue("notes", request.Notes ?? "");
+        cmd.Parameters.AddWithValue("internal_notes", request.Notes ?? "");
         cmd.Parameters.AddWithValue("skills_json", JsonSerializer.Serialize(request.Skills ?? []));
         cmd.Parameters.AddWithValue("secondary_skills_json", JsonSerializer.Serialize(request.SecondarySkills ?? []));
         cmd.Parameters.AddWithValue("experience_required", request.ExperienceRequired ?? "");
@@ -345,6 +380,11 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
         cmd.Parameters.AddWithValue("recruiter_override_comment", request.RecruiterOverrideComment ?? "");
         cmd.Parameters.AddWithValue("timeline_json", JsonSerializer.Serialize(timeline));
         await cmd.ExecuteNonQueryAsync();
+
+        if (request.Contacts is not null)
+            await UpsertContactsAsync(conn, tx, id, request.Contacts);
+
+        await tx.CommitAsync();
     }
 
     public async Task AssignVendorsAsync(int id, AssignVendorsRequest request, string performedBy)
@@ -418,13 +458,19 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
 
     public async Task<int> CreateVendorAsync(Vendor vendor)
     {
-        const string sql = @"insert into vendor (vendor_name, email, supported_roles, budget_min, budget_max, is_active)
-            values (@name, @email, @coverage_roles, @budget_min, @budget_max, @is_active) returning vendor_id;";
+        const string sql = @"insert into vendor (vendor_name, email, uen_no, poc_name, poc_email, poc_phone, sourcing_location, serving_location, supported_roles, budget_min, budget_max, is_active)
+            values (@name, @email, @uen_no, @poc_name, @poc_email, @poc_phone, @sourcing_location, @serving_location, @coverage_roles, @budget_min, @budget_max, @is_active) returning vendor_id;";
         await using var conn = CreateConnection();
         await conn.OpenAsync();
         await using var cmd = new NpgsqlCommand(sql, conn);
         cmd.Parameters.AddWithValue("name", vendor.Name);
         cmd.Parameters.AddWithValue("email", vendor.Email);
+        cmd.Parameters.AddWithValue("uen_no", vendor.UenNo ?? string.Empty);
+        cmd.Parameters.AddWithValue("poc_name", vendor.PocName ?? string.Empty);
+        cmd.Parameters.AddWithValue("poc_email", vendor.PocEmail ?? string.Empty);
+        cmd.Parameters.AddWithValue("poc_phone", vendor.PocPhone ?? string.Empty);
+        cmd.Parameters.AddWithValue("sourcing_location", vendor.SourcingLocation ?? string.Empty);
+        cmd.Parameters.AddWithValue("serving_location", vendor.ServingLocation ?? string.Empty);
         cmd.Parameters.AddWithValue("coverage_roles", vendor.CoverageRoles);
         cmd.Parameters.AddWithValue("budget_min", vendor.BudgetMin);
         cmd.Parameters.AddWithValue("budget_max", vendor.BudgetMax);
@@ -453,7 +499,7 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
     public async Task<(string VendorComment, IReadOnlyList<VendorCandidateSubmission> Items)> GetVendorSubmissionsAsync(int taskId, int? vendorId = null)
     {
         var task = await GetTaskAsync(taskId);
-        var vendorComment = task?.Notes ?? string.Empty;
+        var vendorComment = task?.VendorComment ?? string.Empty;
         var sql = @"select submission_id, planner_id, vendor_id, candidate_name, contact_detail, visa_type, resume_file, candidate_status, is_submitted, created_on, updated_on from planner_candidate_submission where planner_id = @planner_id";
         if (vendorId.HasValue) sql += " and vendor_id = @vendor_id";
         sql += " order by submission_id;";
@@ -520,10 +566,10 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
             ins.Parameters.AddWithValue("is_submitted", request.Submit);
             await ins.ExecuteNonQueryAsync();
         }
-        const string updTask = @"update planner_task set notes = @notes, status = @status, timeline_json = @timeline_json::jsonb where id = @id;";
+        const string updTask = @"update planner_task set vendor_comment = @vendor_comment, status = @status, timeline_json = @timeline_json::jsonb where id = @id;";
         await using (var upd = new NpgsqlCommand(updTask, conn, tx))
         {
-            upd.Parameters.AddWithValue("notes", request.VendorComment ?? string.Empty);
+            upd.Parameters.AddWithValue("vendor_comment", request.VendorComment ?? string.Empty);
             upd.Parameters.AddWithValue("status", request.Submit ? "Vendor Submitted" : task.Status);
             upd.Parameters.AddWithValue("timeline_json", JsonSerializer.Serialize(task.Timeline));
             upd.Parameters.AddWithValue("id", taskId);
@@ -538,6 +584,70 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
             updVa.Parameters.AddWithValue("vendor_id", vendorId);
             await updVa.ExecuteNonQueryAsync();
         }
+        await tx.CommitAsync();
+    }
+
+    public Task<IReadOnlyList<PlannerContact>> GetContactsAsync() => ReadListAsync(@"
+            select contact_id, planner_id, name, title, email, phone, agency, coalesce(contact_level,'') as contact_level, is_primary
+            from planner_contact
+            order by planner_id, is_primary desc, name, contact_id;", MapContact);
+
+    public async Task SaveContactsAsync(IReadOnlyList<PlannerContact> contacts, string performedBy)
+    {
+        await using var conn = CreateConnection();
+        await conn.OpenAsync();
+        await using var tx = await conn.BeginTransactionAsync();
+
+        foreach (var contact in contacts ?? Array.Empty<PlannerContact>())
+        {
+            if (contact.PlannerId <= 0) continue;
+            var normalized = NormalizeContacts(contact.PlannerId, new[] { contact }).FirstOrDefault();
+            if (normalized is null) continue;
+            normalized.Id = contact.Id;
+
+            if (normalized.IsPrimary)
+            {
+                await using var clear = new NpgsqlCommand("update planner_contact set is_primary = false where planner_id = @planner_id;", conn, tx);
+                clear.Parameters.AddWithValue("planner_id", normalized.PlannerId);
+                await clear.ExecuteNonQueryAsync();
+            }
+
+            if (normalized.Id > 0)
+            {
+                const string updateSql = @"
+                    update planner_contact
+                       set name = @name, title = @title, email = @email, phone = @phone,
+                           agency = @agency, contact_level = @contact_level, is_primary = @is_primary
+                     where contact_id = @contact_id;";
+                await using var upd = new NpgsqlCommand(updateSql, conn, tx);
+                upd.Parameters.AddWithValue("contact_id", normalized.Id);
+                upd.Parameters.AddWithValue("name", normalized.Name);
+                upd.Parameters.AddWithValue("title", normalized.Title);
+                upd.Parameters.AddWithValue("email", normalized.Email);
+                upd.Parameters.AddWithValue("phone", normalized.Phone);
+                upd.Parameters.AddWithValue("agency", normalized.Agency);
+                upd.Parameters.AddWithValue("contact_level", normalized.ContactLevel);
+                upd.Parameters.AddWithValue("is_primary", normalized.IsPrimary);
+                await upd.ExecuteNonQueryAsync();
+            }
+            else
+            {
+                const string insertSql = @"
+                    insert into planner_contact (planner_id, name, title, email, phone, agency, contact_level, is_primary)
+                    values (@planner_id, @name, @title, @email, @phone, @agency, @contact_level, @is_primary);";
+                await using var ins = new NpgsqlCommand(insertSql, conn, tx);
+                ins.Parameters.AddWithValue("planner_id", normalized.PlannerId);
+                ins.Parameters.AddWithValue("name", normalized.Name);
+                ins.Parameters.AddWithValue("title", normalized.Title);
+                ins.Parameters.AddWithValue("email", normalized.Email);
+                ins.Parameters.AddWithValue("phone", normalized.Phone);
+                ins.Parameters.AddWithValue("agency", normalized.Agency);
+                ins.Parameters.AddWithValue("contact_level", normalized.ContactLevel);
+                ins.Parameters.AddWithValue("is_primary", normalized.IsPrimary);
+                await ins.ExecuteNonQueryAsync();
+            }
+        }
+
         await tx.CommitAsync();
     }
 
@@ -557,9 +667,121 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
         return items;
     }
 
+    private static PlannerContact MapContact(IDataRecord record) => new()
+    {
+        Id = record.GetInt32(0),
+        PlannerId = record.GetInt32(1),
+        Name = record.GetString(2),
+        Title = record.GetString(3),
+        Email = record.GetString(4),
+        Phone = record.GetString(5),
+        Agency = record.GetString(6),
+        ContactLevel = record.GetString(7),
+        IsPrimary = record.GetBoolean(8)
+    };
+
+    private static async Task<List<PlannerContact>> ReadContactsAsync(NpgsqlConnection connection, int plannerId, NpgsqlTransaction? tx = null)
+    {
+        const string sql = @"
+            select contact_id, planner_id, name, title, email, phone, agency, coalesce(contact_level,'') as contact_level, is_primary
+            from planner_contact
+            where planner_id = @planner_id
+            order by is_primary desc, contact_id;";
+
+        await using var cmd = new NpgsqlCommand(sql, connection, tx);
+        cmd.Parameters.AddWithValue("planner_id", plannerId);
+        await using var reader = await cmd.ExecuteReaderAsync();
+        var results = new List<PlannerContact>();
+        while (await reader.ReadAsync())
+        {
+            results.Add(new PlannerContact
+            {
+                Id = reader.GetInt32(0),
+                PlannerId = reader.GetInt32(1),
+                Name = reader.GetString(2),
+                Title = reader.GetString(3),
+                Email = reader.GetString(4),
+                Phone = reader.GetString(5),
+                Agency = reader.GetString(6),
+                ContactLevel = reader.GetString(7),
+                IsPrimary = reader.GetBoolean(8)
+            });
+        }
+        return results;
+    }
+
+    private static async Task UpsertContactsAsync(NpgsqlConnection connection, NpgsqlTransaction tx, int plannerId, IReadOnlyList<PlannerContact> contacts)
+    {
+        var normalized = NormalizeContacts(plannerId, contacts);
+
+        const string deleteSql = "delete from planner_contact where planner_id = @planner_id;";
+        await using (var del = new NpgsqlCommand(deleteSql, connection, tx))
+        {
+            del.Parameters.AddWithValue("planner_id", plannerId);
+            await del.ExecuteNonQueryAsync();
+        }
+
+        if (normalized.Count == 0) return;
+
+        const string insertSql = @"
+            insert into planner_contact (planner_id, name, title, email, phone, agency, contact_level, is_primary)
+            values (@planner_id, @name, @title, @email, @phone, @agency, @is_primary);";
+
+        foreach (var contact in normalized)
+        {
+            await using var ins = new NpgsqlCommand(insertSql, connection, tx);
+            ins.Parameters.AddWithValue("planner_id", plannerId);
+            ins.Parameters.AddWithValue("name", contact.Name ?? string.Empty);
+            ins.Parameters.AddWithValue("title", contact.Title ?? string.Empty);
+            ins.Parameters.AddWithValue("email", contact.Email ?? string.Empty);
+            ins.Parameters.AddWithValue("phone", contact.Phone ?? string.Empty);
+            ins.Parameters.AddWithValue("agency", contact.Agency ?? string.Empty);
+            ins.Parameters.AddWithValue("contact_level", contact.ContactLevel ?? string.Empty);
+            ins.Parameters.AddWithValue("is_primary", contact.IsPrimary);
+            await ins.ExecuteNonQueryAsync();
+        }
+    }
+
+    private static List<PlannerContact> NormalizeContacts(int plannerId, IReadOnlyList<PlannerContact> contacts)
+    {
+        var items = (contacts ?? Array.Empty<PlannerContact>())
+            .Select(x => new PlannerContact
+            {
+                PlannerId = plannerId,
+                Name = x.Name?.Trim() ?? string.Empty,
+                Title = x.Title?.Trim() ?? string.Empty,
+                Email = x.Email?.Trim() ?? string.Empty,
+                Phone = x.Phone?.Trim() ?? string.Empty,
+                Agency = x.Agency?.Trim() ?? string.Empty,
+                ContactLevel = x.ContactLevel?.Trim() ?? string.Empty,
+                IsPrimary = x.IsPrimary
+            })
+            .Where(x => !(string.IsNullOrWhiteSpace(x.Name)
+                          && string.IsNullOrWhiteSpace(x.Title)
+                          && string.IsNullOrWhiteSpace(x.Email)
+                          && string.IsNullOrWhiteSpace(x.Phone)
+                          && string.IsNullOrWhiteSpace(x.Agency)
+                          && string.IsNullOrWhiteSpace(x.ContactLevel)))
+            .ToList();
+
+        if (items.Count == 0) return items;
+        if (items.All(x => !x.IsPrimary)) items[0].IsPrimary = true;
+        else
+        {
+            var seenPrimary = false;
+            foreach (var item in items)
+            {
+                if (!item.IsPrimary) continue;
+                if (!seenPrimary) seenPrimary = true;
+                else item.IsPrimary = false;
+            }
+        }
+        return items;
+    }
+
     private const string TaskSelectSql = @"
-        select id, planner_no, client_name, requirement_title, role, category, priority, budget, budget_max, currency, received_on, sla_date,
-               status, open_positions, source_type, contact_name, contact_email, contact_phone, requirement_asked, notes,
+        select id, planner_no, client_name, requirement_title, role, seniority_level, category, priority, budget, budget_max, currency, received_on, sla_date,
+               status, open_positions, source_type, contact_name, contact_email, contact_phone, requirement_asked, internal_notes, vendor_comment,
                skills_json::text, secondary_skills_json::text, gaps_json::text, experience_required, location, work_mode, employment_type, recruiter_override_comment,
                timeline_json::text, recommended_candidate_ids_json::text,
                coalesce((select jsonb_agg(pva.vendor_id) from planner_vendor_assignment pva where pva.planner_id = planner_task.id), assigned_vendor_ids_json, '[]'::jsonb)::text
@@ -572,32 +794,34 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
         ClientName = record.GetString(2),
         RequirementTitle = record.GetString(3),
         Role = record.GetString(4),
-        Category = record.GetString(5),
-        Priority = record.GetString(6),
-        Budget = record.GetDecimal(7),
-        BudgetMax = record.IsDBNull(8) ? null : record.GetDecimal(8),
-        Currency = record.GetString(9),
-        ReceivedOn = record.GetDateTime(10),
-        SlaDate = record.GetDateTime(11),
-        Status = record.GetString(12),
-        OpenPositions = record.GetInt32(13),
-        SourceType = record.GetString(14),
-        ContactName = record.GetString(15),
-        ContactEmail = record.GetString(16),
-        ContactPhone = record.GetString(17),
-        RequirementAsked = record.GetString(18),
-        Notes = record.GetString(19),
-        Skills = DeserializeList<string>(record.GetString(20)),
-        SecondarySkills = DeserializeList<string>(record.GetString(21)),
-        Gaps = DeserializeList<string>(record.GetString(22)),
-        ExperienceRequired = record.GetString(23),
-        Location = record.GetString(24),
-        WorkMode = record.GetString(25),
-        EmploymentType = record.GetString(26),
-        RecruiterOverrideComment = record.GetString(27),
-        Timeline = DeserializeList<TaskTimelineItem>(record.GetString(28)),
-        RecommendedCandidateIds = DeserializeList<int>(record.GetString(29)),
-        AssignedVendorIds = DeserializeList<int>(record.GetString(30))
+        SeniorityLevel = record.GetString(5),
+        Category = record.GetString(6),
+        Priority = record.GetString(7),
+        Budget = record.GetDecimal(8),
+        BudgetMax = record.IsDBNull(9) ? null : record.GetDecimal(9),
+        Currency = record.GetString(10),
+        ReceivedOn = record.GetDateTime(11),
+        SlaDate = record.GetDateTime(12),
+        Status = record.GetString(13),
+        OpenPositions = record.GetInt32(14),
+        SourceType = record.GetString(15),
+        ContactName = record.GetString(16),
+        ContactEmail = record.GetString(17),
+        ContactPhone = record.GetString(18),
+        RequirementAsked = record.GetString(19),
+        Notes = record.GetString(20),
+        VendorComment = record.GetString(21),
+        Skills = DeserializeList<string>(record.GetString(22)),
+        SecondarySkills = DeserializeList<string>(record.GetString(23)),
+        Gaps = DeserializeList<string>(record.GetString(24)),
+        ExperienceRequired = record.GetString(25),
+        Location = record.GetString(26),
+        WorkMode = record.GetString(27),
+        EmploymentType = record.GetString(28),
+        RecruiterOverrideComment = record.GetString(29),
+        Timeline = DeserializeList<TaskTimelineItem>(record.GetString(30)),
+        RecommendedCandidateIds = DeserializeList<int>(record.GetString(31)),
+        AssignedVendorIds = DeserializeList<int>(record.GetString(32))
     };
 
     private static Candidate MapCandidate(IDataRecord record) => new()
@@ -614,7 +838,22 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
     };
 
     private static RuleModel MapRule(IDataRecord record) => new() { Id = record.GetInt32(0), Name = record.GetString(1), Category = record.GetString(2), Condition = record.GetString(3), Outcome = record.GetString(4), IsActive = record.GetBoolean(5) };
-    private static Vendor MapVendor(IDataRecord record) => new() { Id = record.GetInt32(0), Name = record.GetString(1), Email = record.GetString(2), CoverageRoles = record.GetString(3), BudgetMin = record.GetDecimal(4), BudgetMax = record.GetDecimal(5), Status = record.GetString(6) };
+    private static Vendor MapVendor(IDataRecord record) => new()
+    {
+        Id = record.GetInt32(0),
+        Name = record.GetString(1),
+        Email = record.GetString(2),
+        UenNo = record.GetString(3),
+        PocName = record.GetString(4),
+        PocEmail = record.GetString(5),
+        PocPhone = record.GetString(6),
+        SourcingLocation = record.GetString(7),
+        ServingLocation = record.GetString(8),
+        CoverageRoles = record.GetString(9),
+        BudgetMin = record.GetDecimal(10),
+        BudgetMax = record.GetDecimal(11),
+        Status = record.GetString(12)
+    };
     private static VendorCandidateSubmission MapVendorCandidateSubmission(IDataRecord record) => new()
     {
         SubmissionId = record.GetInt32(0),
@@ -651,6 +890,16 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
         if (content.Contains("DevOps", StringComparison.OrdinalIgnoreCase)) return "DevOps Engineer";
         if (content.Contains("QA", StringComparison.OrdinalIgnoreCase)) return "QA Engineer";
         return string.IsNullOrWhiteSpace(subject) ? "Technical Consultant" : subject.Trim();
+    }
+
+    private static string GuessSeniorityLevel(string role, string body)
+    {
+        var content = $"{role}\n{body}";
+        if (Regex.IsMatch(content, @"\b(lead|principal|manager|head)\b", RegexOptions.IgnoreCase)) return "Lead";
+        if (Regex.IsMatch(content, @"\b(senior|sr\.?)\b", RegexOptions.IgnoreCase)) return "Senior";
+        if (Regex.IsMatch(content, @"\b(mid|intermediate)\b", RegexOptions.IgnoreCase)) return "Mid";
+        if (Regex.IsMatch(content, @"\b(junior|jr\.?)\b", RegexOptions.IgnoreCase)) return "Junior";
+        return string.Empty;
     }
 
     private static decimal GuessBudget(string body)

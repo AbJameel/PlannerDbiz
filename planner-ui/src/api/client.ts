@@ -57,5 +57,7 @@ export const api = {
   setInitialPassword: (payload: { email: string; activationToken: string; otpCode: string; newPassword: string; confirmPassword: string }) => request('/auth/set-initial-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
   getUsers: () => request('/users'),
   getRoles: () => request('/users/roles'),
+  getContacts: () => request('/contacts'),
+  saveContacts: (payload: unknown) => request('/contacts/bulk-save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
   createUser: (payload: unknown) => request('/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
 };

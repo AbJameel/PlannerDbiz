@@ -17,12 +17,25 @@ export type TimelineItem = {
   performedBy: string;
 };
 
+export type PlannerContact = {
+  id?: number;
+  plannerId?: number;
+  name: string;
+  title: string;
+  email: string;
+  phone: string;
+  agency: string;
+  contactLevel: string;
+  isPrimary: boolean;
+};
+
 export type PlannerTask = {
   id: number;
   plannerNo: string;
   clientName: string;
   requirementTitle: string;
   role: string;
+  seniorityLevel: string;
   category: string;
   priority: string;
   budget: number;
@@ -36,8 +49,10 @@ export type PlannerTask = {
   contactName: string;
   contactEmail: string;
   contactPhone: string;
+  contacts: PlannerContact[];
   requirementAsked: string;
   notes: string;
+  vendorComment: string;
   skills: string[];
   secondarySkills: string[];
   gaps: string[];
@@ -64,6 +79,12 @@ export type Vendor = {
   id: number;
   name: string;
   email: string;
+  uenNo: string;
+  pocName: string;
+  pocEmail: string;
+  pocPhone: string;
+  sourcingLocation: string;
+  servingLocation: string;
   coverageRoles: string;
   budgetMin: number;
   budgetMax: number;

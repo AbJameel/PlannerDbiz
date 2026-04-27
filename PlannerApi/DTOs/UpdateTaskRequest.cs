@@ -1,3 +1,5 @@
+using PlannerApi.Models;
+
 namespace PlannerApi.DTOs;
 
 public class UpdateTaskRequest
@@ -5,6 +7,7 @@ public class UpdateTaskRequest
     public string ClientName { get; set; } = "DBiz Internal";
     public string RequirementTitle { get; set; } = string.Empty;
     public string Role { get; set; } = string.Empty;
+    public string? SeniorityLevel { get; set; }
     public string Category { get; set; } = "General";
     public decimal Budget { get; set; }
     public decimal? BudgetMax { get; set; }
@@ -15,6 +18,7 @@ public class UpdateTaskRequest
     public string ContactName { get; set; } = string.Empty;
     public string ContactEmail { get; set; } = string.Empty;
     public string ContactPhone { get; set; } = string.Empty;
+    public List<PlannerContact>? Contacts { get; set; }
     public string RequirementAsked { get; set; } = string.Empty;
     public string Notes { get; set; } = string.Empty;
     public List<string> Skills { get; set; } = [];

@@ -135,12 +135,12 @@ insert into public.planner_task
 (planner_no, client_name, role, priority, budget, currency, received_on, sla_date, status, open_positions,
  source_type, contact_name, contact_email, requirement_asked, skills_json, gaps_json, timeline_json,
  recommended_candidate_ids_json, assigned_vendor_ids_json, requirement_title, category, budget_max,
- notes, secondary_skills_json, experience_required, location, work_mode, employment_type)
+ internal_notes, secondary_skills_json, experience_required, location, work_mode, employment_type)
 values
 (@planner_no, @client_name, @role, @priority, @budget, 'SGD', @received_on, @sla_date, @status, @open_positions,
  @source_type, @contact_name, @contact_email, @requirement_asked, @skills_json::jsonb, @gaps_json::jsonb, @timeline_json::jsonb,
  '[]'::jsonb, '[]'::jsonb, @requirement_title, @category, @budget_max,
- @notes, @secondary_skills_json::jsonb, @experience_required, @location, @work_mode, @employment_type);";
+ @internal_notes, @secondary_skills_json::jsonb, @experience_required, @location, @work_mode, @employment_type);";
 
         await using var cmd = new NpgsqlCommand(sql, connection, tx);
         cmd.Parameters.AddWithValue("planner_no", plannerNo);
@@ -162,7 +162,7 @@ values
         cmd.Parameters.AddWithValue("requirement_title", requirementTitle);
         cmd.Parameters.AddWithValue("category", category);
         cmd.Parameters.AddWithValue("budget_max", NpgsqlDbType.Numeric, (object?)budgetMax ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("notes", notes);
+        cmd.Parameters.AddWithValue("internal_notes", notes);
         cmd.Parameters.AddWithValue("secondary_skills_json", secondarySkillsJson);
         cmd.Parameters.AddWithValue("experience_required", experienceRequired);
         cmd.Parameters.AddWithValue("location", location);

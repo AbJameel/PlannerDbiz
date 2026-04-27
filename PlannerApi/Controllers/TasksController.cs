@@ -36,7 +36,9 @@ public class TasksController : ControllerBase
     {
         if (UserRole != "VENDOR") return Forbid();
         if (!VendorId.HasValue) return Unauthorized("VendorId missing in token. Please log out and log in again.");
-        return Ok(await repository.GetTasksForVendorAsync(VendorId.Value));
+        var items = await repository.GetTasksForVendorAsync(VendorId.Value);
+        foreach (var task in items) task.Notes = string.Empty;
+        return Ok(items);
     }
 
     [HttpGet("review-queue")]
@@ -68,6 +70,7 @@ public class TasksController : ControllerBase
         var task = await repository.GetTaskAsync(id);
         if (task is null) return NotFound();
         if (IsVendorDenied(task)) return Forbid();
+        if (UserRole == "VENDOR") task.Notes = string.Empty;
         return Ok(task);
     }
 
@@ -333,7 +336,9 @@ public class TasksController : ControllerBase
         if (UserRole == "VENDOR")
         {
             if (!VendorId.HasValue) return [];
-            return await repository.GetTasksForVendorAsync(VendorId.Value);
+            var items = await repository.GetTasksForVendorAsync(VendorId.Value);
+            foreach (var task in items) task.Notes = string.Empty;
+            return items;
         }
 
         return reviewOnly ? await repository.GetReviewQueueAsync() : await repository.GetTasksAsync();

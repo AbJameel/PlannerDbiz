@@ -19,11 +19,19 @@ export function VendorsPage() {
       </div>
       <div className="card-grid">
         {vendors.map((vendor) => (
-          <div key={vendor.id} className="mini-card">
+          <div key={vendor.id} className="mini-card" style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
             <strong>{vendor.name}</strong>
-            <p>{vendor.coverageRoles}</p>
-            <small>{vendor.email}</small>
-            <small>Budget: SGD {vendor.budgetMin} - {vendor.budgetMax}</small>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>{vendor.coverageRoles}</p>
+            <div style={{ marginTop: '0.5rem', fontSize: '0.875rem' }}>
+              <div><strong>UEN:</strong> {vendor.uenNo || '-'}</div>
+              <div><strong>Email:</strong> {vendor.email}</div>
+              <div><strong>Budget:</strong> SGD {vendor.budgetMin} - {vendor.budgetMax}</div>
+              <div><strong>Location:</strong> {vendor.sourcingLocation} / {vendor.servingLocation}</div>
+              <div style={{ marginTop: '0.5rem' }}>
+                <strong>POC:</strong> {vendor.pocName} <br/>
+                <span style={{ color: 'var(--text-secondary)' }}>{vendor.pocEmail} | {vendor.pocPhone}</span>
+              </div>
+            </div>
           </div>
         ))}
       </div>

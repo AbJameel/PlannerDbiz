@@ -7,6 +7,7 @@ public class PlannerTask
     public string ClientName { get; set; } = "DBiz Internal";
     public string RequirementTitle { get; set; } = string.Empty;
     public string Role { get; set; } = string.Empty;
+    public string SeniorityLevel { get; set; } = string.Empty;
     public string Category { get; set; } = "General";
     public string Priority { get; set; } = "Medium";
     public decimal Budget { get; set; }
@@ -20,8 +21,10 @@ public class PlannerTask
     public string ContactName { get; set; } = string.Empty;
     public string ContactEmail { get; set; } = string.Empty;
     public string ContactPhone { get; set; } = string.Empty;
+    public List<PlannerContact> Contacts { get; set; } = [];
     public string RequirementAsked { get; set; } = string.Empty;
     public string Notes { get; set; } = string.Empty;
+    public string VendorComment { get; set; } = string.Empty;
     public List<string> Skills { get; set; } = [];
     public List<string> SecondarySkills { get; set; } = [];
     public List<string> Gaps { get; set; } = [];

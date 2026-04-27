@@ -13,6 +13,8 @@ public interface IPostgresRepository
     Task<IReadOnlyList<Vendor>> GetVendorsAsync();
     Task<IReadOnlyList<Vendor>> GetRecommendedVendorsAsync(int taskId);
     Task<IReadOnlyList<MailboxItem>> GetMailboxAsync();
+    Task<IReadOnlyList<PlannerContact>> GetContactsAsync();
+    Task SaveContactsAsync(IReadOnlyList<PlannerContact> contacts, string performedBy);
     Task<DashboardSummary> GetSummaryAsync();
     Task<DashboardSummary> GetVendorSummaryAsync(int vendorId);
     Task<IReadOnlyList<PlannerTask>> GetTasksForVendorAsync(int vendorId);

@@ -5,6 +5,7 @@ import { getSession } from '../lib/auth';
 import type {
   Candidate,
   PlannerTask,
+  PlannerContact,
   Vendor,
   VendorCandidateSubmission
 } from '../types';
@@ -31,7 +32,7 @@ export function TaskDetailPage() {
   const [vendorIds, setVendorIds] = useState<number[]>([]);
   const [vendorComment, setVendorComment] = useState('');
   const [submissions, setSubmissions] = useState<VendorCandidateSubmission[]>([]);
-  const [activeTab, setActiveTab] = useState<'edit' | 'history'>('edit');
+  const [activeTab, setActiveTab] = useState<'edit' | 'contacts' | 'history'>('edit');
   const [requirementTab, setRequirementTab] = useState<'actual' | 'winnable' | 'gaps'>(
     'actual'
   );
@@ -120,6 +121,40 @@ export function TaskDetailPage() {
     updateTask(kind, items as PlannerTask[typeof kind]);
   }
 
+  function addContact() {
+    if (!task) return;
+    const newContacts = [...(task.contacts || [])];
+    newContacts.push({
+      name: '',
+      title: '',
+      email: '',
+      phone: '',
+      agency: '',
+      contactLevel: '',
+      isPrimary: newContacts.length === 0
+    });
+    updateTask('contacts', newContacts);
+  }
+
+  function updateContact(index: number, patch: Partial<PlannerContact>) {
+    if (!task) return;
+    const newContacts = [...(task.contacts || [])];
+    if (patch.isPrimary) {
+      newContacts.forEach((c) => (c.isPrimary = false));
+    }
+    newContacts[index] = { ...newContacts[index], ...patch };
+    updateTask('contacts', newContacts);
+  }
+
+  function removeContact(index: number) {
+    if (!task) return;
+    const newContacts = task.contacts.filter((_, i) => i !== index);
+    if (newContacts.length > 0 && !newContacts.some((c) => c.isPrimary)) {
+      newContacts[0].isPrimary = true;
+    }
+    updateTask('contacts', newContacts);
+  }
+
   function addSubmission() {
     setSubmissions((current) => [
       ...current,
@@ -159,6 +194,7 @@ export function TaskDetailPage() {
         clientName: task.clientName,
         requirementTitle: task.requirementTitle,
         role: task.role,
+        seniorityLevel: task.seniorityLevel,
         category: task.category,
         budget: Number(task.budget || 0),
         budgetMax: task.budgetMax ? Number(task.budgetMax) : null,
@@ -169,6 +205,7 @@ export function TaskDetailPage() {
         contactName: task.contactName,
         contactEmail: task.contactEmail,
         contactPhone: task.contactPhone,
+        contacts: task.contacts,
         requirementAsked: task.requirementAsked,
         notes: task.notes,
         skills: task.skills,
@@ -338,6 +375,13 @@ export function TaskDetailPage() {
             </button>
             <button
               type="button"
+              className={`tab-btn ${activeTab === 'contacts' ? 'active' : ''}`}
+              onClick={() => setActiveTab('contacts')}
+            >
+              Contacts
+            </button>
+            <button
+              type="button"
               className={`tab-btn ${activeTab === 'history' ? 'active' : ''}`}
               onClick={() => setActiveTab('history')}
             >
@@ -346,7 +390,101 @@ export function TaskDetailPage() {
           </div>
         )}
 
-        {isVendor || activeTab === 'edit' ? (
+        {!isVendor && activeTab === 'contacts' ? (
+          <section className="editor-section history-tab-panel">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h3>Contacts</h3>
+                <p className="muted">Maintain multiple client/agency contacts for this task.</p>
+              </div>
+              <button type="button" onClick={addContact} className="secondary-btn">
+                + Add Contact
+              </button>
+            </div>
+            <div className="table-wrap" style={{ marginTop: 12 }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Title</th>
+                    <th>Email</th>
+                    <th>Mobile</th>
+                    <th>Agency</th>
+                    <th style={{ width: 90, textAlign: 'center' }}>Primary</th>
+                    <th style={{ width: 120 }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {task.contacts?.map((contact, i) => (
+                    <tr key={i}>
+                      <td>
+                        <input
+                          value={contact.name}
+                          onChange={(e) => updateContact(i, { name: e.target.value })}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          value={contact.title}
+                          onChange={(e) => updateContact(i, { title: e.target.value })}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          value={contact.email}
+                          onChange={(e) => updateContact(i, { email: e.target.value })}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          value={contact.phone}
+                          onChange={(e) => updateContact(i, { phone: e.target.value })}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          value={contact.agency}
+                          onChange={(e) => updateContact(i, { agency: e.target.value })}
+                        />
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        <input
+                          type="checkbox"
+                          checked={contact.isPrimary}
+                          onChange={(e) => {
+                            if (e.target.checked) updateContact(i, { isPrimary: true });
+                          }}
+                          style={{ width: 'auto' }}
+                        />
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="secondary-btn"
+                          onClick={() => removeContact(i)}
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td colSpan={7}>
+                      <button type="button" className="secondary-btn" onClick={addContact}>
+                        + Add Contact
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            {task.contacts?.length === 0 && (
+              <p className="muted" style={{ marginTop: 10 }}>
+                No contacts added.
+              </p>
+            )}
+          </section>
+        ) : isVendor || activeTab === 'edit' ? (
           <div className="workspace-grid">
             <div className="editor-column">
               <section className="editor-section">
@@ -376,6 +514,15 @@ export function TaskDetailPage() {
                       value={task.role}
                       disabled={isVendor}
                       onChange={(e) => updateTask('role', e.target.value)}
+                    />
+                  </label>
+
+                  <label>
+                    Seniority Level
+                    <input
+                      value={task.seniorityLevel}
+                      disabled={isVendor}
+                      onChange={(e) => updateTask('seniorityLevel', e.target.value)}
                     />
                   </label>
 
@@ -487,29 +634,21 @@ export function TaskDetailPage() {
                   </section>
 
                   <section className="editor-section">
-                    <h3>Contact & Skills</h3>
+                    <h3>Skills & Requirements</h3>
                     <div className="form-grid">
-                      <label>
-                        Contact Name
+                      <label className="full-span">
+                        Skills (comma separated)
                         <input
-                          value={task.contactName}
-                          onChange={(e) => updateTask('contactName', e.target.value)}
+                          value={(task.skills ?? []).join(', ')}
+                          onChange={(e) => updateSkillList('skills', e.target.value)}
                         />
                       </label>
 
-                      <label>
-                        Contact Email
+                      <label className="full-span">
+                        Winnable Skills (comma separated)
                         <input
-                          value={task.contactEmail}
-                          onChange={(e) => updateTask('contactEmail', e.target.value)}
-                        />
-                      </label>
-
-                      <label>
-                        Contact Phone
-                        <input
-                          value={task.contactPhone}
-                          onChange={(e) => updateTask('contactPhone', e.target.value)}
+                          value={(task.secondarySkills ?? []).join(', ')}
+                          onChange={(e) => updateSkillList('secondarySkills', e.target.value)}
                         />
                       </label>
 
@@ -546,253 +685,244 @@ export function TaskDetailPage() {
                       </label>
 
                       <label className="full-span">
-                        Primary Skills (comma separated)
-                        <input
-                          value={task.skills.join(', ')}
-                          onChange={(e) => updateSkillList('skills', e.target.value)}
-                        />
-                      </label>
-
-                      <label className="full-span">
-                        Secondary Skills (comma separated)
-                        <input
-                          value={task.secondarySkills.join(', ')}
-                          onChange={(e) => updateSkillList('secondarySkills', e.target.value)}
-                        />
-                      </label>
-
-                      <label className="full-span">
                         Recruiter Override Comment
                         <textarea
                           rows={3}
                           value={task.recruiterOverrideComment}
-                          onChange={(e) =>
-                            updateTask('recruiterOverrideComment', e.target.value)
-                          }
+                          onChange={(e) => updateTask('recruiterOverrideComment', e.target.value)}
                         />
                       </label>
                     </div>
+                  </section>
+
+                  <section className="editor-section">
+                    <h3>Requirement Analysis</h3>
+                    <div className="tab-strip">
+                      <button
+                        type="button"
+                        className={`tab-btn ${requirementTab === 'actual' ? 'active' : ''}`}
+                        onClick={() => setRequirementTab('actual')}
+                      >
+                        Actual Skills
+                      </button>
+                      <button
+                        type="button"
+                        className={`tab-btn ${requirementTab === 'winnable' ? 'active' : ''}`}
+                        onClick={() => setRequirementTab('winnable')}
+                      >
+                        Winnable Skills
+                      </button>
+                      <button
+                        type="button"
+                        className={`tab-btn ${requirementTab === 'gaps' ? 'active' : ''}`}
+                        onClick={() => setRequirementTab('gaps')}
+                      >
+                        Gaps
+                      </button>
+                    </div>
+
+                    {requirementTab === 'actual' &&
+                      renderSkillChips(task.skills, 'No actual skills listed.')}
+                    {requirementTab === 'winnable' &&
+                      renderSkillChips(task.secondarySkills, 'No winnable skills listed.')}
+                    {requirementTab === 'gaps' && renderSkillChips(task.gaps, 'No gaps listed.')}
                   </section>
                 </>
               )}
 
               {isVendor && (
                 <section className="editor-section">
-                  <h3>Candidate Submission</h3>
-                  <div className="stack-list">
-                    {submissions.map((item, index) => (
-                      <div key={index} className="mini-card">
-                        <div className="form-grid">
-                          <label>
-                            Candidate Name
-                            <input
-                              disabled={vendorSubmitted || item.isSubmitted}
-                              value={item.candidateName}
-                              onChange={(e) =>
-                                updateSubmission(index, { candidateName: e.target.value })
-                              }
-                            />
-                          </label>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                    <div>
+                      <h3>Candidate Submission</h3>
+                      <p className="muted">Add candidates, save as draft, then submit.</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="secondary-btn"
+                      onClick={addSubmission}
+                      disabled={vendorSubmitted}
+                    >
+                      + Add Candidate
+                    </button>
+                  </div>
 
-                          <label>
-                            Contact Detail
-                            <input
-                              disabled={vendorSubmitted || item.isSubmitted}
-                              value={item.contactDetail}
-                              onChange={(e) =>
-                                updateSubmission(index, { contactDetail: e.target.value })
-                              }
-                            />
-                          </label>
+                  {submissions.length === 0 ? (
+                    <p className="muted">No candidates added yet.</p>
+                  ) : (
+                    <div className="stack-list">
+                      {submissions.map((item, index) => (
+                        <div key={`${item.submissionId}-${index}`} className="candidate-draft-card">
+                          <div className="form-grid">
+                            <label className="full-span">
+                              Candidate Name
+                              <input
+                                value={item.candidateName}
+                                disabled={vendorSubmitted}
+                                onChange={(e) =>
+                                  updateSubmission(index, { candidateName: e.target.value })
+                                }
+                              />
+                            </label>
 
-                          <label>
-                            Visa Type
-                            <input
-                              disabled={vendorSubmitted || item.isSubmitted}
-                              value={item.visaType}
-                              onChange={(e) =>
-                                updateSubmission(index, { visaType: e.target.value })
-                              }
-                            />
-                          </label>
+                            <label className="full-span">
+                              Contact Details
+                              <input
+                                value={item.contactDetail}
+                                disabled={vendorSubmitted}
+                                onChange={(e) =>
+                                  updateSubmission(index, { contactDetail: e.target.value })
+                                }
+                              />
+                            </label>
 
-                          <label>
-                            Upload Resume
-                            <input
-                              type="file"
-                              disabled={vendorSubmitted || item.isSubmitted}
-                              onChange={(e) =>
-                                updateSubmission(index, {
-                                  resumeFile: e.target.files?.[0]?.name ?? item.resumeFile
-                                })
-                              }
-                            />
-                            <small className="muted">{item.resumeFile}</small>
-                          </label>
-                        </div>
+                            <label>
+                              Visa Type
+                              <input
+                                value={item.visaType}
+                                disabled={vendorSubmitted}
+                                onChange={(e) =>
+                                  updateSubmission(index, { visaType: e.target.value })
+                                }
+                              />
+                            </label>
 
-                        {!vendorSubmitted && !item.isSubmitted && (
+                            <label>
+                              Resume File
+                              <input
+                                value={item.resumeFile}
+                                disabled={vendorSubmitted}
+                                onChange={(e) =>
+                                  updateSubmission(index, { resumeFile: e.target.value })
+                                }
+                              />
+                            </label>
+                          </div>
+
                           <div className="mini-actions">
                             <button
                               type="button"
                               className="secondary-btn"
                               onClick={() => removeSubmission(index)}
+                              disabled={vendorSubmitted}
                             >
                               Remove
                             </button>
                           </div>
-                        )}
-                      </div>
-                    ))}
-
-                    {!vendorSubmitted && (
-                      <button
-                        type="button"
-                        className="secondary-btn"
-                        onClick={addSubmission}
-                      >
-                        + Add Candidate
-                      </button>
-                    )}
-                  </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </section>
               )}
             </div>
 
             <div className="side-column">
-              <section className="editor-section">
-                <h3>Requirement Analysis</h3>
-                <p className="muted">Requirement Classification: {task.category || '-'}</p>
-
-                <div className="tab-strip">
-                  <button
-                    type="button"
-                    className={`tab-btn ${requirementTab === 'actual' ? 'active' : ''}`}
-                    onClick={() => setRequirementTab('actual')}
-                  >
-                    Actual
-                  </button>
-                  <button
-                    type="button"
-                    className={`tab-btn ${requirementTab === 'winnable' ? 'active' : ''}`}
-                    onClick={() => setRequirementTab('winnable')}
-                  >
-                    Winnable
-                  </button>
-                  <button
-                    type="button"
-                    className={`tab-btn ${requirementTab === 'gaps' ? 'active' : ''}`}
-                    onClick={() => setRequirementTab('gaps')}
-                  >
-                    Gaps
-                  </button>
-                </div>
-
-                {requirementTab === 'actual' && (
-                  <div className="stack-list">
-                    <div>
-                      <p className="muted">Actual requirement from JD</p>
-                      <div className="info-card">
-                        <small>{task.requirementAsked || 'No requirement text available.'}</small>
-                      </div>
-                    </div>
-                    <div>
-                      <p className="muted">Requirement Skills (Must-have)</p>
-                      {renderSkillChips(task.skills, 'No must-have skills captured yet.')}
-                    </div>
-                  </div>
-                )}
-
-                {requirementTab === 'winnable' && (
-                  <div className="stack-list">
-                    <p className="muted">Winnable Skills (Good-to-have)</p>
-                    {renderSkillChips(task.secondarySkills, 'No winnable skills captured yet.')}
-                  </div>
-                )}
-
-                {requirementTab === 'gaps' && (
-                  <div className="stack-list">
-                    <p className="muted">Gap Skills (Missing areas)</p>
-                    {renderSkillChips(task.gaps, 'No gaps identified.')}
-                  </div>
-                )}
-              </section>
+              {!isVendor && (
+                <section className="editor-section">
+                  <h3>Assign Vendors</h3>
+                  <VendorMultiSelect
+                    vendors={vendorOptions}
+                    selectedVendorIds={vendorIds}
+                    onChange={setVendorIds}
+                  />
+                  <p className="muted">Recommended vendors appear first in the list.</p>
+                </section>
+              )}
 
               {!isVendor && (
-                <>
-                  <section className="editor-section">
-                    <h3>Recommended Candidates</h3>
+                <section className="editor-section">
+                  <h3>Recommended Candidates</h3>
+                  {recommendedCandidates.length === 0 ? (
+                    <p className="muted">No recommended candidates.</p>
+                  ) : (
                     <div className="stack-list">
-                      {recommendedCandidates.length === 0 && (
-                        <p className="muted">No candidate recommendations yet.</p>
-                      )}
-
-                      {recommendedCandidates.map((candidate) => (
+                      {recommendedCandidates.slice(0, 8).map((candidate) => (
                         <div key={candidate.id} className="mini-card">
                           <strong>{candidate.name}</strong>
-                          <p>{candidate.currentRole}</p>
-                          <small>
+                          <p className="muted">{candidate.currentRole}</p>
+                          <small className="muted">
                             {candidate.experienceYears} years · {candidate.noticePeriod}
                           </small>
-                          <small>Expected: SGD {candidate.expectedBudget}</small>
                         </div>
                       ))}
                     </div>
-                  </section>
-
-                  <section className="editor-section">
-                    <h3>Assign Vendors</h3>
-                    <VendorMultiSelect
-                      vendors={vendorOptions}
-                      selectedVendorIds={vendorIds}
-                      onChange={setVendorIds}
-                    />
-                  </section>
-                </>
+                  )}
+                </section>
               )}
 
               <section className="editor-section">
                 <h3>{isVendor ? 'My Candidate List' : 'Vendor Candidate List'}</h3>
-                <div className="stack-list">
-                  {submissions.length === 0 ? (
-                    <p className="muted">No candidates added yet.</p>
-                  ) : (
-                    submissions.map((item, idx) => (
-                      <div key={idx} className="mini-card">
-                        <strong>{item.candidateName || 'Draft Candidate'}</strong>
-                        <p>{item.contactDetail}</p>
-                        <small>
-                          {item.visaType} · {item.resumeFile || 'No resume uploaded'}
-                        </small>
-                        <small>Status: {item.candidateStatus}</small>
-                      </div>
-                    ))
-                  )}
-                </div>
+                {submissions.length === 0 ? (
+                  <p className="muted">No candidates submitted yet.</p>
+                ) : (
+                  <div className="table-scroll">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          {!isVendor && <th>Vendor</th>}
+                          <th>Candidate</th>
+                          <th>Contact</th>
+                          <th>Visa</th>
+                          <th>Status</th>
+                          <th>Submitted</th>
+                          <th>Created</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {submissions.map((item, index) => {
+                          const vendorName =
+                            allVendors.find((v) => v.id === item.vendorId)?.name ??
+                            recommendedVendors.find((v) => v.id === item.vendorId)?.name ??
+                            (item.vendorId ? String(item.vendorId) : '');
+
+                          return (
+                            <tr key={`${item.submissionId}-${index}`}>
+                              {!isVendor && <td>{vendorName}</td>}
+                              <td>{item.candidateName}</td>
+                              <td>{item.contactDetail}</td>
+                              <td>{item.visaType}</td>
+                              <td>{item.candidateStatus}</td>
+                              <td style={{ textAlign: 'center' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={item.isSubmitted}
+                                  readOnly
+                                  style={{ width: 'auto' }}
+                                />
+                              </td>
+                              <td>{new Date(item.createdOn).toLocaleString()}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </section>
             </div>
           </div>
         ) : (
           <section className="editor-section history-tab-panel">
-            <h3>Task History</h3>
-            <div className="timeline">
-              {task.timeline.length === 0 ? (
-                <p className="muted">No history available.</p>
-              ) : (
-                task.timeline.map((item, index) => (
+            <h3>History</h3>
+            {task.timeline?.length === 0 ? (
+              <p className="muted">No history recorded.</p>
+            ) : (
+              <div className="timeline compact">
+                {task.timeline.map((item, index) => (
                   <div key={index} className="timeline-item">
                     <div className="timeline-dot" />
                     <div>
                       <strong>{item.title}</strong>
-                      <p>{item.description}</p>
-                      <small>
+                      <p className="muted">{item.description}</p>
+                      <small className="muted">
                         {new Date(item.happenedOn).toLocaleString()} · {item.performedBy}
                       </small>
                     </div>
                   </div>
-                ))
-              )}
-            </div>
+                ))}
+              </div>
+            )}
           </section>
         )}
       </section>
