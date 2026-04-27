@@ -94,6 +94,60 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
         };
     }
 
+
+    public async Task<DashboardSummary> GetVendorSummaryAsync(int vendorId)
+    {
+        const string sql = @"
+            select
+                count(*) filter (where lower(coalesce(pva.status,'')) in ('assigned','assigned to vendor')) as assigned_queue,
+                count(*) filter (where lower(coalesce(pva.status,'')) in ('assigned','assigned to vendor') and not exists (
+                    select 1 from planner_candidate_submission pcs
+                    where pcs.planner_id = p.id and pcs.vendor_id = @vendor_id and pcs.is_submitted = true
+                )) as pending_submission,
+                count(*) filter (where exists (
+                    select 1 from planner_candidate_submission pcs
+                    where pcs.planner_id = p.id and pcs.vendor_id = @vendor_id and pcs.is_submitted = true
+                )) as replied_to_recruiter,
+                count(*) filter (where p.sla_date::date = current_date) as sla_today
+            from planner_task p
+            inner join planner_vendor_assignment pva on pva.planner_id = p.id
+            where pva.vendor_id = @vendor_id;";
+
+        await using var conn = CreateConnection();
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("vendor_id", vendorId);
+        await using var reader = await cmd.ExecuteReaderAsync(CommandBehavior.SingleRow);
+        if (!await reader.ReadAsync()) return new DashboardSummary();
+        var assignedQueue = Convert.ToInt32(reader.GetInt64(0));
+        var pendingSubmission = Convert.ToInt32(reader.GetInt64(1));
+        var repliedToRecruiter = Convert.ToInt32(reader.GetInt64(2));
+        var slaToday = Convert.ToInt32(reader.GetInt64(3));
+        return new DashboardSummary
+        {
+            AssignedQueue = assignedQueue,
+            PendingSubmission = pendingSubmission,
+            RepliedToRecruiter = repliedToRecruiter,
+            SlaToday = slaToday,
+            NewTasks = assignedQueue,
+            UnderReview = pendingSubmission,
+            AssignedToVendors = repliedToRecruiter,
+            ClosingToday = slaToday
+        };
+    }
+
+    public Task<IReadOnlyList<PlannerTask>> GetTasksForVendorAsync(int vendorId) => ReadListAsync(TaskSelectSql + @"
+            where exists (
+                select 1 from planner_vendor_assignment pva
+                where pva.planner_id = planner_task.id and pva.vendor_id = @vendor_id
+            )
+            order by received_on desc;", MapTask, new Dictionary<string, object?> { ["vendor_id"] = vendorId });
+
+    public Task<IReadOnlyList<VendorCandidateSubmission>> GetSubmittedCandidatesForVendorAsync(int vendorId) => ReadListAsync(@"
+            select submission_id, planner_id, vendor_id, candidate_name, contact_detail, visa_type, resume_file, candidate_status, is_submitted, created_on, updated_on
+            from planner_candidate_submission
+            where vendor_id = @vendor_id and is_submitted = true
+            order by created_on desc, submission_id desc;", MapVendorCandidateSubmission, new Dictionary<string, object?> { ["vendor_id"] = vendorId });
     public async Task<IReadOnlyList<Candidate>> GetRecommendedCandidatesAsync(int taskId)
     {
         var task = await GetTaskAsync(taskId);
@@ -219,172 +273,6 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
             await tx.RollbackAsync();
             logger.LogError(ex, "Error creating task.");
             throw;
-        }
-    }
-
-    public async Task<int> CreateTaskFromGptExtractionAsync(
-        GptExtractedJobInfo job,
-        string fallbackSubject,
-        string fallbackFromEmail,
-        string sourceType,
-        string? fileName,
-        string gptFileId,
-        string extractorJson,
-        string jdAnalysis,
-        string clarificationEmail)
-    {
-        var combinedText = $"{job.JobDetails}\n{job.SpecialNotes}\n{job.Timeline}\n{job.IndicativeOnboardingTimeline}\n{job.Deadline}\n{jdAnalysis}";
-        var role = FirstNonEmpty(job.Role, job.Title, GuessRole(fallbackSubject, combinedText));
-        var requirementTitle = FirstNonEmpty(job.Title, job.Role, fallbackSubject, role);
-        var client = FirstNonEmpty(job.Agency, "DBiz Internal");
-        var fromEmail = FirstNonEmpty(job.Sender, fallbackFromEmail, "internal@dbiz.com");
-        var contactName = FirstNonEmpty(job.Name, "Internal Request");
-        var contactDetails = job.ContactDetails ?? string.Empty;
-        var budget = GuessBudget(combinedText);
-        var budgetMax = budget > 0 ? budget + 1500 : (decimal?)null;
-        var openPositions = ParseIntOrDefault(job.Headcount, GuessOpenPositions(combinedText));
-        var skills = GuessSkills(combinedText);
-        var secondarySkills = GuessSecondarySkills(combinedText, skills);
-        var gaps = ExtractGapsFromAnalysis(jdAnalysis);
-        if (gaps.Count == 0)
-            gaps = BuildGaps(role, budget, combinedText);
-        var priority = budget >= 9000 ? "High" : budget >= 6000 ? "Medium" : "Low";
-        var plannerNo = $"PLN-{DateTime.UtcNow:yyyyMMddHHmmssfff}";
-        var slaDate = ParseDateOrDefault(job.Deadline, ExtractSlaDate(combinedText) ?? DateTime.UtcNow.AddDays(3));
-        var category = GuessCategory(role, combinedText);
-        var requirementAsked = FirstNonEmpty(job.JobDetails, Summarize(combinedText));
-        var notes = $"Auto-created from GPT extracted uploaded file {fileName}. GPT File Id: {gptFileId}";
-        var timeline = new List<TaskTimelineItem>
-        {
-            new()
-            {
-                HappenedOn = DateTime.UtcNow,
-                Title = "Task created from GPT analysis",
-                Description = "Planner task created from uploaded mail/JD using GPT extractor, analyser and clarification pipeline.",
-                PerformedBy = "System"
-            }
-        };
-
-        const string insertTask = @"
-            insert into planner_task
-            (planner_no, client_name, requirement_title, role, category, priority, budget, budget_max, currency, received_on, sla_date, status, open_positions,
-             source_type, contact_name, contact_email, contact_phone, requirement_asked, notes, skills_json, secondary_skills_json, gaps_json, timeline_json,
-             experience_required, location, work_mode, employment_type, recruiter_override_comment, recommended_candidate_ids_json, assigned_vendor_ids_json)
-            values
-            (@planner_no, @client_name, @requirement_title, @role, @category, @priority, @budget, @budget_max, @currency, now(), @sla_date, 'New', @open_positions,
-             @source_type, @contact_name, @contact_email, @contact_phone, @requirement_asked, @notes, @skills_json::jsonb, @secondary_skills_json::jsonb, @gaps_json::jsonb, @timeline_json::jsonb,
-             @experience_required, @location, @work_mode, @employment_type, @recruiter_override_comment, '[]'::jsonb, '[]'::jsonb)
-            returning id;";
-
-        const string insertMailbox = @"insert into mailbox_item (subject, from_email, received_on, snippet, is_read, source_type)
-            values (@subject, @from_email, now(), @snippet, false, @source_type);";
-
-        await using var conn = CreateConnection();
-        await conn.OpenAsync();
-        await using var tx = await conn.BeginTransactionAsync();
-        try
-        {
-            await using var taskCmd = new NpgsqlCommand(insertTask, conn, tx);
-            taskCmd.Parameters.AddWithValue("planner_no", plannerNo);
-            taskCmd.Parameters.AddWithValue("client_name", client);
-            taskCmd.Parameters.AddWithValue("requirement_title", requirementTitle);
-            taskCmd.Parameters.AddWithValue("role", role);
-            taskCmd.Parameters.AddWithValue("category", category);
-            taskCmd.Parameters.AddWithValue("priority", priority);
-            taskCmd.Parameters.AddWithValue("budget", budget);
-            taskCmd.Parameters.AddWithValue("budget_max", (object?)budgetMax ?? DBNull.Value);
-            taskCmd.Parameters.AddWithValue("currency", "SGD");
-            taskCmd.Parameters.AddWithValue("sla_date", slaDate);
-            taskCmd.Parameters.AddWithValue("open_positions", openPositions);
-            taskCmd.Parameters.AddWithValue("source_type", sourceType);
-            taskCmd.Parameters.AddWithValue("contact_name", contactName);
-            taskCmd.Parameters.AddWithValue("contact_email", ExtractEmail(fromEmail));
-            taskCmd.Parameters.AddWithValue("contact_phone", ExtractPhone(contactDetails));
-            taskCmd.Parameters.AddWithValue("requirement_asked", requirementAsked);
-            taskCmd.Parameters.AddWithValue("notes", notes);
-            taskCmd.Parameters.AddWithValue("skills_json", JsonSerializer.Serialize(skills));
-            taskCmd.Parameters.AddWithValue("secondary_skills_json", JsonSerializer.Serialize(secondarySkills));
-            taskCmd.Parameters.AddWithValue("gaps_json", JsonSerializer.Serialize(gaps));
-            taskCmd.Parameters.AddWithValue("timeline_json", JsonSerializer.Serialize(timeline));
-            taskCmd.Parameters.AddWithValue("experience_required", FirstNonEmpty(job.Seniority, GuessExperience(combinedText)));
-            taskCmd.Parameters.AddWithValue("location", GuessLocation(combinedText));
-            taskCmd.Parameters.AddWithValue("work_mode", GuessWorkMode(combinedText));
-            taskCmd.Parameters.AddWithValue("employment_type", FirstNonEmpty(job.DurationOfContract, GuessEmploymentType(combinedText)));
-            taskCmd.Parameters.AddWithValue("recruiter_override_comment", clarificationEmail ?? string.Empty);
-            var taskId = Convert.ToInt32(await taskCmd.ExecuteScalarAsync());
-
-            await using var mailboxCmd = new NpgsqlCommand(insertMailbox, conn, tx);
-            mailboxCmd.Parameters.AddWithValue("subject", requirementTitle);
-            mailboxCmd.Parameters.AddWithValue("from_email", ExtractEmail(fromEmail));
-            mailboxCmd.Parameters.AddWithValue("snippet", Summarize(requirementAsked));
-            mailboxCmd.Parameters.AddWithValue("source_type", sourceType);
-            await mailboxCmd.ExecuteNonQueryAsync();
-
-            var recommendedIds = (await FindRecommendedCandidateIdsAsync(conn, tx, role, budgetMax ?? budget, skills)).ToList();
-            if (recommendedIds.Count > 0)
-            {
-                const string updateSql = "update planner_task set recommended_candidate_ids_json = @ids::jsonb where id = @id;";
-                await using var updateCmd = new NpgsqlCommand(updateSql, conn, tx);
-                updateCmd.Parameters.AddWithValue("ids", JsonSerializer.Serialize(recommendedIds));
-                updateCmd.Parameters.AddWithValue("id", taskId);
-                await updateCmd.ExecuteNonQueryAsync();
-            }
-
-            await tx.CommitAsync();
-            return taskId;
-        }
-        catch (Exception ex)
-        {
-            await tx.RollbackAsync();
-            logger.LogError(ex, "Error creating GPT extracted task.");
-            throw;
-        }
-    }
-
-    public async Task SaveGapAnalysisReplyAsync(int taskId, string gptFileId, string gapAnalysis, string clarificationEmail, string extractorJson)
-    {
-        const string sql = @"
-            insert into planner_gap_analysis_reply
-            (task_id, gpt_file_id, gap_analysis, clarification_email, extractor_json, created_on)
-            values
-            (@task_id, @gpt_file_id, @gap_analysis, @clarification_email, @extractor_json::jsonb, now());";
-
-        await using var conn = CreateConnection();
-        await conn.OpenAsync();
-        await using var cmd = new NpgsqlCommand(sql, conn);
-        cmd.Parameters.AddWithValue("task_id", taskId);
-        cmd.Parameters.AddWithValue("gpt_file_id", gptFileId);
-        cmd.Parameters.AddWithValue("gap_analysis", gapAnalysis ?? string.Empty);
-        cmd.Parameters.AddWithValue("clarification_email", clarificationEmail ?? string.Empty);
-        cmd.Parameters.AddWithValue("extractor_json", NormalizeJsonArrayForPostgres(extractorJson));
-        await cmd.ExecuteNonQueryAsync();
-    }
-
-    private static string NormalizeJsonArrayForPostgres(string? content)
-    {
-        if (string.IsNullOrWhiteSpace(content))
-            return "[]";
-
-        var trimmed = content.Trim();
-        var jsonStart = trimmed.IndexOf('[');
-        var jsonEnd = trimmed.LastIndexOf(']');
-
-        if (jsonStart < 0 || jsonEnd <= jsonStart)
-            return "[]";
-
-        var json = trimmed.Substring(jsonStart, jsonEnd - jsonStart + 1);
-
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.ValueKind != JsonValueKind.Array)
-                return "[]";
-
-            return JsonSerializer.Serialize(doc.RootElement);
-        }
-        catch
-        {
-            return "[]";
         }
     }
 
@@ -540,7 +428,7 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
         cmd.Parameters.AddWithValue("coverage_roles", vendor.CoverageRoles);
         cmd.Parameters.AddWithValue("budget_min", vendor.BudgetMin);
         cmd.Parameters.AddWithValue("budget_max", vendor.BudgetMax);
-        cmd.Parameters.AddWithValue("is_active", string.IsNullOrWhiteSpace(vendor.Status) || vendor.Status.Equals("Active", StringComparison.OrdinalIgnoreCase));
+        cmd.Parameters.AddWithValue("is_active", vendor.Status.Equals("Active", StringComparison.OrdinalIgnoreCase));
         return Convert.ToInt32(await cmd.ExecuteScalarAsync());
     }
 
@@ -564,8 +452,6 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
 
     public async Task<(string VendorComment, IReadOnlyList<VendorCandidateSubmission> Items)> GetVendorSubmissionsAsync(int taskId, int? vendorId = null)
     {
-        await EnsurePlannerCandidateSubmissionTableAsync();
-
         var task = await GetTaskAsync(taskId);
         var vendorComment = task?.Notes ?? string.Empty;
         var sql = @"select submission_id, planner_id, vendor_id, candidate_name, contact_detail, visa_type, resume_file, candidate_status, is_submitted, created_on, updated_on from planner_candidate_submission where planner_id = @planner_id";
@@ -600,8 +486,6 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
 
     public async Task SaveVendorSubmissionsAsync(int taskId, int vendorId, SaveVendorCandidatesRequest request, string performedBy)
     {
-        await EnsurePlannerCandidateSubmissionTableAsync();
-
         var task = await GetTaskAsync(taskId) ?? throw new InvalidOperationException("Task not found.");
         task.Timeline.Add(new TaskTimelineItem
         {
@@ -645,44 +529,28 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
             upd.Parameters.AddWithValue("id", taskId);
             await upd.ExecuteNonQueryAsync();
         }
+
+        const string updVendorAssignment = @"update planner_vendor_assignment set status = @status where planner_id = @planner_id and vendor_id = @vendor_id;";
+        await using (var updVa = new NpgsqlCommand(updVendorAssignment, conn, tx))
+        {
+            updVa.Parameters.AddWithValue("status", request.Submit ? "Submitted" : "Draft");
+            updVa.Parameters.AddWithValue("planner_id", taskId);
+            updVa.Parameters.AddWithValue("vendor_id", vendorId);
+            await updVa.ExecuteNonQueryAsync();
+        }
         await tx.CommitAsync();
     }
 
-    private async Task EnsurePlannerCandidateSubmissionTableAsync()
-    {
-        const string sql = @"
-            CREATE TABLE IF NOT EXISTS planner_candidate_submission (
-                submission_id SERIAL PRIMARY KEY,
-                planner_id INT NOT NULL REFERENCES planner_task(id) ON DELETE CASCADE,
-                vendor_id INT NOT NULL REFERENCES vendor(vendor_id),
-                candidate_name VARCHAR(255) NOT NULL DEFAULT '',
-                contact_detail VARCHAR(255) NOT NULL DEFAULT '',
-                visa_type VARCHAR(100) NOT NULL DEFAULT '',
-                resume_file VARCHAR(255) NOT NULL DEFAULT '',
-                candidate_status VARCHAR(50) NOT NULL DEFAULT 'Draft',
-                is_submitted BOOLEAN NOT NULL DEFAULT FALSE,
-                created_on TIMESTAMP NOT NULL DEFAULT NOW(),
-                updated_on TIMESTAMP NULL
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_planner_candidate_submission_planner
-                ON planner_candidate_submission(planner_id);
-
-            CREATE INDEX IF NOT EXISTS idx_planner_candidate_submission_vendor
-                ON planner_candidate_submission(vendor_id);
-        ";
-
-        await using var conn = CreateConnection();
-        await conn.OpenAsync();
-        await using var cmd = new NpgsqlCommand(sql, conn);
-        await cmd.ExecuteNonQueryAsync();
-    }
-
-    private async Task<IReadOnlyList<T>> ReadListAsync<T>(string sql, Func<IDataRecord, T> mapper)
+    private async Task<IReadOnlyList<T>> ReadListAsync<T>(string sql, Func<IDataRecord, T> mapper, Dictionary<string, object?>? parameters = null)
     {
         await using var conn = CreateConnection();
         await conn.OpenAsync();
         await using var cmd = new NpgsqlCommand(sql, conn);
+        if (parameters is not null)
+        {
+            foreach (var item in parameters)
+                cmd.Parameters.AddWithValue(item.Key, item.Value ?? DBNull.Value);
+        }
         await using var reader = await cmd.ExecuteReaderAsync();
         var items = new List<T>();
         while (await reader.ReadAsync()) items.Add(mapper(reader));
@@ -693,7 +561,8 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
         select id, planner_no, client_name, requirement_title, role, category, priority, budget, budget_max, currency, received_on, sla_date,
                status, open_positions, source_type, contact_name, contact_email, contact_phone, requirement_asked, notes,
                skills_json::text, secondary_skills_json::text, gaps_json::text, experience_required, location, work_mode, employment_type, recruiter_override_comment,
-               timeline_json::text, recommended_candidate_ids_json::text, assigned_vendor_ids_json::text
+               timeline_json::text, recommended_candidate_ids_json::text,
+               coalesce((select jsonb_agg(pva.vendor_id) from planner_vendor_assignment pva where pva.planner_id = planner_task.id), assigned_vendor_ids_json, '[]'::jsonb)::text
         from planner_task";
 
     private static PlannerTask MapTask(IDataRecord record) => new()
@@ -746,6 +615,21 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
 
     private static RuleModel MapRule(IDataRecord record) => new() { Id = record.GetInt32(0), Name = record.GetString(1), Category = record.GetString(2), Condition = record.GetString(3), Outcome = record.GetString(4), IsActive = record.GetBoolean(5) };
     private static Vendor MapVendor(IDataRecord record) => new() { Id = record.GetInt32(0), Name = record.GetString(1), Email = record.GetString(2), CoverageRoles = record.GetString(3), BudgetMin = record.GetDecimal(4), BudgetMax = record.GetDecimal(5), Status = record.GetString(6) };
+    private static VendorCandidateSubmission MapVendorCandidateSubmission(IDataRecord record) => new()
+    {
+        SubmissionId = record.GetInt32(0),
+        PlannerId = record.GetInt32(1),
+        VendorId = record.GetInt32(2),
+        CandidateName = record.GetString(3),
+        ContactDetail = record.GetString(4),
+        VisaType = record.GetString(5),
+        ResumeFile = record.GetString(6),
+        CandidateStatus = record.GetString(7),
+        IsSubmitted = record.GetBoolean(8),
+        CreatedOn = record.GetDateTime(9),
+        UpdatedOn = record.IsDBNull(10) ? null : record.GetDateTime(10)
+    };
+
     private static MailboxItem MapMailbox(IDataRecord record) => new() { Id = record.GetInt32(0), Subject = record.GetString(1), FromEmail = record.GetString(2), ReceivedOn = record.GetDateTime(3), Snippet = record.GetString(4), IsRead = record.GetBoolean(5), SourceType = record.GetString(6) };
     private static List<T> DeserializeList<T>(string json) => JsonSerializer.Deserialize<List<T>>(json, JsonOptions) ?? [];
 
@@ -863,75 +747,6 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
         return null;
     }
 
-    private static string FirstNonEmpty(params string?[] values)
-    {
-        foreach (var value in values)
-        {
-            if (!string.IsNullOrWhiteSpace(value))
-                return value.Trim();
-        }
-        return string.Empty;
-    }
-
-    private static int ParseIntOrDefault(string? value, int defaultValue)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-            return defaultValue;
-        var match = Regex.Match(value, @"\d+");
-        return match.Success && int.TryParse(match.Value, out var parsed) ? parsed : defaultValue;
-    }
-
-    private static DateTime ParseDateOrDefault(string? value, DateTime defaultValue)
-    {
-        if (!string.IsNullOrWhiteSpace(value) && DateTime.TryParse(value, out var parsed))
-            return parsed;
-        return defaultValue;
-    }
-
-    private static string ExtractEmail(string value)
-    {
-        var match = Regex.Match(value ?? string.Empty, @"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", RegexOptions.IgnoreCase);
-        return match.Success ? match.Value : (string.IsNullOrWhiteSpace(value) ? "internal@dbiz.com" : value.Trim());
-    }
-
-    private static string ExtractPhone(string value)
-    {
-        var match = Regex.Match(value ?? string.Empty, @"(?:\+?\d[\d\s\-()]{6,}\d)");
-        return match.Success ? match.Value.Trim() : string.Empty;
-    }
-
-    private static List<string> ExtractGapsFromAnalysis(string analysis)
-    {
-        var gaps = new List<string>();
-        if (string.IsNullOrWhiteSpace(analysis))
-            return gaps;
-
-        var capture = false;
-        foreach (var rawLine in analysis.Replace("\r", string.Empty).Split('\n'))
-        {
-            var line = rawLine.Trim();
-            if (line.Length == 0)
-                continue;
-
-            if (line.Contains("Gaps", StringComparison.OrdinalIgnoreCase) ||
-                line.Contains("Missing", StringComparison.OrdinalIgnoreCase) ||
-                line.Contains("Clarification", StringComparison.OrdinalIgnoreCase))
-            {
-                capture = true;
-                continue;
-            }
-
-            if (capture && Regex.IsMatch(line, @"^\d+\s*[).]|^[-*•]") )
-            {
-                var cleaned = Regex.Replace(line, @"^(\d+\s*[).]|[-*•])\s*", "").Trim();
-                if (!string.IsNullOrWhiteSpace(cleaned))
-                    gaps.Add(cleaned);
-            }
-        }
-
-        return gaps.Distinct(StringComparer.OrdinalIgnoreCase).Take(20).ToList();
-    }
-
     private static async Task<List<int>> FindRecommendedCandidateIdsAsync(
         NpgsqlConnection conn, NpgsqlTransaction tx, string role, decimal budget, List<string> skills)
     {
@@ -971,97 +786,139 @@ public class PostgresRepository(IConfiguration configuration, ILogger<PostgresRe
     int? vendorId,
     string? slaDate)
     {
-        var sql = """
-        SELECT
-            p.id,
-            p.planner_no,
-            p.client_name,
-            COALESCE(p.requirement_title, '') AS requirement_title,
-            p.role,
-            p.status,
-            p.priority,
-            p.budget,
-            p.currency,
-            p.sla_date,
-            p.open_positions
-        FROM planner_task p
-        WHERE 1 = 1
-        """;
-
+        var conditions = new List<string>();
         var parameters = new Dictionary<string, object?>();
 
-        if (userRole == "VENDOR" && vendorId.HasValue)
+        var isVendor = string.Equals(userRole, "VENDOR", StringComparison.OrdinalIgnoreCase);
+
+        if (isVendor)
         {
-            sql += """
-            AND EXISTS (
-                SELECT 1
-                FROM planner_vendor_assignment va
-                WHERE va.planner_id = p.id
-                  AND va.vendor_id = @vendorId
-            )
-            """;
+            if (!vendorId.HasValue)
+                return (Array.Empty<PlannerListItem>(), 0);
+
+            conditions.Add("pva.vendor_id = @vendorId");
             parameters["vendorId"] = vendorId.Value;
         }
 
         if (!string.IsNullOrWhiteSpace(status))
         {
-            sql += " AND p.status = @status ";
-            parameters["status"] = status;
+            conditions.Add("LOWER(COALESCE(pva.status, t.status, '')) = LOWER(@status)");
+            parameters["status"] = status.Trim();
         }
 
         if (!string.IsNullOrWhiteSpace(priority))
         {
-            sql += " AND p.priority = @priority ";
-            parameters["priority"] = priority;
+            conditions.Add("LOWER(COALESCE(t.priority, '')) = LOWER(@priority)");
+            parameters["priority"] = priority.Trim();
         }
 
         if (!string.IsNullOrWhiteSpace(role))
         {
-            sql += " AND LOWER(p.role) LIKE LOWER(@role) ";
-            parameters["role"] = $"%{role}%";
+            conditions.Add("LOWER(COALESCE(t.role, '')) LIKE LOWER(@role)");
+            parameters["role"] = $"%{role.Trim()}%";
         }
 
         if (!string.IsNullOrWhiteSpace(clientName))
         {
-            sql += " AND LOWER(p.client_name) LIKE LOWER(@clientName) ";
-            parameters["clientName"] = $"%{clientName}%";
+            conditions.Add("LOWER(COALESCE(t.client_name, '')) LIKE LOWER(@clientName)");
+            parameters["clientName"] = $"%{clientName.Trim()}%";
         }
 
         if (!string.IsNullOrWhiteSpace(search))
         {
-            sql += " AND LOWER(COALESCE(p.requirement_asked, '')) LIKE LOWER(@search) ";
-            parameters["search"] = $"%{search}%";
-        }
-
-        if (!string.IsNullOrWhiteSpace(slaDate))
-        {
-            sql += " AND DATE(p.sla_date) = DATE(@slaDate) ";
-            parameters["slaDate"] = slaDate;
+            conditions.Add(@"(
+            LOWER(COALESCE(t.planner_no, '')) LIKE LOWER(@search)
+            OR LOWER(COALESCE(t.requirement_title, '')) LIKE LOWER(@search)
+            OR LOWER(COALESCE(t.client_name, '')) LIKE LOWER(@search)
+            OR LOWER(COALESCE(t.role, '')) LIKE LOWER(@search)
+            OR LOWER(COALESCE(t.requirement_asked, '')) LIKE LOWER(@search)
+        )");
+            parameters["search"] = $"%{search.Trim()}%";
         }
 
         if (closingToday == true)
         {
-            sql += " AND DATE(p.sla_date) = CURRENT_DATE ";
+            conditions.Add("t.sla_date::date = CURRENT_DATE");
         }
 
-        sql += " ORDER BY p.received_on DESC ";
-
-        var items = await ReadListAsync(sql, reader => new PlannerListItem
+        if (!string.IsNullOrWhiteSpace(slaDate) && DateTime.TryParse(slaDate, out var parsedSlaDate))
         {
-            Id = reader.GetInt32(0),
-            PlannerNo = reader.GetString(1),
-            ClientName = reader.GetString(2),
-            RequirementTitle = reader.GetString(3),
-            Role = reader.GetString(4),
-            Status = reader.GetString(5),
-            Priority = reader.GetString(6),
-            Budget = reader.GetDecimal(7),
-            Currency = reader.GetString(8),
-            SlaDate = reader.GetDateTime(9),
-            OpenPositions = reader.GetInt32(10)
+            conditions.Add("t.sla_date::date = @slaDate");
+            parameters["slaDate"] = parsedSlaDate.Date;
+        }
+
+        var whereClause = conditions.Count > 0
+            ? "WHERE " + string.Join(" AND ", conditions)
+            : "";
+
+        var fromSql = @"
+        FROM planner_task t
+        LEFT JOIN planner_vendor_assignment pva 
+            ON pva.planner_id = t.id
+    ";
+
+        var countSql = $@"
+        SELECT COUNT(DISTINCT t.id)
+        {fromSql}
+        {whereClause};
+    ";
+
+        var listSql = $@"
+        SELECT DISTINCT
+            t.id,
+            t.planner_no,
+            t.requirement_title,
+            t.client_name,
+            t.role,
+            t.priority,
+            COALESCE(pva.status, t.status) AS status,
+            t.sla_date,
+            t.received_on
+        {fromSql}
+        {whereClause}
+        ORDER BY t.received_on DESC, t.id DESC;
+    ";
+
+        await using var conn = CreateConnection();
+        await conn.OpenAsync();
+
+        var totalCount = 0;
+        await using (var countCmd = new NpgsqlCommand(countSql, conn))
+        {
+            AddParameters(countCmd, parameters);
+            var countResult = await countCmd.ExecuteScalarAsync();
+            totalCount = Convert.ToInt32(countResult);
+        }
+
+        var items = await ReadListAsync(listSql, reader => new PlannerListItem
+        {
+            Id = reader.GetInt32(reader.GetOrdinal("id")),
+            PlannerId = reader.GetInt32(reader.GetOrdinal("id")),
+            PlannerNo = reader["planner_no"]?.ToString() ?? "",
+            Title = reader["requirement_title"]?.ToString() ?? "",
+            ClientName = reader["client_name"]?.ToString() ?? "",
+            Role = reader["role"]?.ToString() ?? "",
+            Priority = reader["priority"]?.ToString() ?? "",
+            Status = reader["status"]?.ToString() ?? "",
+            SlaDate = reader["sla_date"] == DBNull.Value
+                ? default
+                : Convert.ToDateTime(reader["sla_date"]),
+            CreatedAt = reader["received_on"] == DBNull.Value
+                ? default
+                : Convert.ToDateTime(reader["received_on"])
         }, parameters);
 
-        return (items, items.Count);
+        return (items.ToList(), totalCount);
+    }
+
+    private static void AddParameters(
+    Npgsql.NpgsqlCommand cmd,
+    Dictionary<string, object?> parameters)
+    {
+        foreach (var p in parameters)
+        {
+            cmd.Parameters.AddWithValue(p.Key, p.Value ?? DBNull.Value);
+        }
     }
 
     private async Task<List<T>> ReadListAsync<T>(

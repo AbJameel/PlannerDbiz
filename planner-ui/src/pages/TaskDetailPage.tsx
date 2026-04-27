@@ -32,6 +32,9 @@ export function TaskDetailPage() {
   const [vendorComment, setVendorComment] = useState('');
   const [submissions, setSubmissions] = useState<VendorCandidateSubmission[]>([]);
   const [activeTab, setActiveTab] = useState<'edit' | 'history'>('edit');
+  const [requirementTab, setRequirementTab] = useState<'actual' | 'winnable' | 'gaps'>(
+    'actual'
+  );
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -256,7 +259,22 @@ export function TaskDetailPage() {
   if (loading) return <div className="panel">Loading task details...</div>;
   if (!task) return <div className="panel">Task not found.</div>;
 
-  const vendorSubmitted = task.status === 'Vendor Submitted';
+  const vendorSubmitted = isVendor
+    ? submissions.some((item) => item.isSubmitted)
+    : task.status === 'Vendor Submitted';
+
+  function renderSkillChips(items: string[], emptyText: string) {
+    if (!items || items.length === 0) return <p className="muted">{emptyText}</p>;
+    return (
+      <div className="chip-row">
+        {items.map((s) => (
+          <span key={s} className="chip">
+            {s}
+          </span>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="page-grid">
@@ -642,19 +660,66 @@ export function TaskDetailPage() {
             </div>
 
             <div className="side-column">
+              <section className="editor-section">
+                <h3>Requirement Analysis</h3>
+                <p className="muted">Requirement Classification: {task.category || '-'}</p>
+
+                <div className="tab-strip">
+                  <button
+                    type="button"
+                    className={`tab-btn ${requirementTab === 'actual' ? 'active' : ''}`}
+                    onClick={() => setRequirementTab('actual')}
+                  >
+                    Actual
+                  </button>
+                  <button
+                    type="button"
+                    className={`tab-btn ${requirementTab === 'winnable' ? 'active' : ''}`}
+                    onClick={() => setRequirementTab('winnable')}
+                  >
+                    Winnable
+                  </button>
+                  <button
+                    type="button"
+                    className={`tab-btn ${requirementTab === 'gaps' ? 'active' : ''}`}
+                    onClick={() => setRequirementTab('gaps')}
+                  >
+                    Gaps
+                  </button>
+                </div>
+
+                {requirementTab === 'actual' && (
+                  <div className="stack-list">
+                    <div>
+                      <p className="muted">Actual requirement from JD</p>
+                      <div className="info-card">
+                        <small>{task.requirementAsked || 'No requirement text available.'}</small>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="muted">Requirement Skills (Must-have)</p>
+                      {renderSkillChips(task.skills, 'No must-have skills captured yet.')}
+                    </div>
+                  </div>
+                )}
+
+                {requirementTab === 'winnable' && (
+                  <div className="stack-list">
+                    <p className="muted">Winnable Skills (Good-to-have)</p>
+                    {renderSkillChips(task.secondarySkills, 'No winnable skills captured yet.')}
+                  </div>
+                )}
+
+                {requirementTab === 'gaps' && (
+                  <div className="stack-list">
+                    <p className="muted">Gap Skills (Missing areas)</p>
+                    {renderSkillChips(task.gaps, 'No gaps identified.')}
+                  </div>
+                )}
+              </section>
+
               {!isVendor && (
                 <>
-                  <section className="editor-section">
-                    <h3>Rule / Gap Review</h3>
-                    <ul className="clean-list">
-                      {task.gaps.length === 0 ? (
-                        <li>No gaps found.</li>
-                      ) : (
-                        task.gaps.map((gap) => <li key={gap}>{gap}</li>)
-                      )}
-                    </ul>
-                  </section>
-
                   <section className="editor-section">
                     <h3>Recommended Candidates</h3>
                     <div className="stack-list">

@@ -4,6 +4,10 @@ export type DashboardSummary = {
   underReview: number;
   assignedToVendors: number;
   closingToday: number;
+  assignedQueue?: number;
+  pendingSubmission?: number;
+  repliedToRecruiter?: number;
+  slaToday?: number;
 };
 
 export type TimelineItem = {

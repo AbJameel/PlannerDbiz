@@ -3,6 +3,7 @@ export type SessionUser = {
   roleCode: string;
   token: string;
   email?: string;
+  vendorId?: number | null;
 };
 
 const STORAGE_KEY = 'planner_session';

@@ -70,7 +70,7 @@ public class AuthService(
         if (user.IsLocked) return new LoginResponse { Success = false, Message = "User is locked." };
         if (user.IsFirstLogin || string.IsNullOrWhiteSpace(user.PasswordHash))
         {
-            return new LoginResponse { Success = false, Message = "First-time activation required.", RequiresFirstLogin = true, UserId = user.UserId, RoleCode = user.RoleCode };
+            return new LoginResponse { Success = false, Message = "First-time activation required.", RequiresFirstLogin = true, UserId = user.UserId, RoleCode = user.RoleCode, VendorId = user.VendorId };
         }
         if (!passwordService.VerifyPassword(user.PasswordHash, request.Password))
         {
@@ -79,6 +79,6 @@ public class AuthService(
         }
         var token = tokenService.CreateToken(user);
         await repository.WriteAuditAsync(user.UserId, "LOGIN_SUCCESS", "User logged in successfully", ipAddress);
-        return new LoginResponse { Success = true, Message = "Login successful.", Token = token, RoleCode = user.RoleCode, UserId = user.UserId, RequiresFirstLogin = false };
+        return new LoginResponse { Success = true, Message = "Login successful.", Token = token, RoleCode = user.RoleCode, UserId = user.UserId, VendorId = user.VendorId, RequiresFirstLogin = false };
     }
 }

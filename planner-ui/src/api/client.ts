@@ -32,6 +32,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   getDashboardSummary: () => request('/dashboard/summary'),
+  getTasks: () => request('/tasks'),
+  getVendorQueue: () => request('/tasks/vendor-queue'),
   getReviewQueue: () => request('/tasks/review-queue'),
   getTask: (id: string | number) => request(`/tasks/${id}`),
   getPlannerList: (queryString = '') => request(`/tasks/list${queryString ? `?${queryString}` : ''}`),
@@ -46,6 +48,7 @@ export const api = {
   getVendors: () => request('/vendors'),
   createVendor: (payload: unknown) => request('/vendors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
   getCandidates: () => request('/candidates'),
+  getVendorSubmittedCandidates: () => request('/candidates/vendor-submitted'),
   createCandidate: (payload: unknown) => request('/candidates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
   getMailbox: () => request('/mailbox'),
   uploadMail: (payload: { file?: File | null; fromEmail: string; emailContent?: string }) => { const formData = new FormData(); if (payload.file) formData.append('file', payload.file); formData.append('fromEmail', payload.fromEmail); if (payload.emailContent) formData.append('emailContent', payload.emailContent); return request('/tasks/upload-mail', { method: 'POST', body: formData }); },

@@ -16,17 +16,12 @@ export function LoginPage() {
     setError('');
     try {
       const result = await api.login({ email, password }) as any;
-      setSession({ token: result.token, roleCode: result.roleCode, userId: result.userId, email });
+      setSession({ token: result.token, roleCode: result.roleCode, userId: result.userId, vendorId: result.vendorId, email });
       navigate('/');
     } catch (err: any) {
       const msg = err?.message || 'Login failed';
-      let display = msg;
-      try {
-        const parsed = JSON.parse(msg) as { message?: unknown };
-        if (parsed && typeof parsed === 'object' && typeof parsed.message === 'string') display = parsed.message;
-      } catch { }
-      if (display.includes('First-time activation')) setError('First-time activation required. Use the activation link from your email.');
-      else setError(display);
+      if (msg.includes('First-time activation')) setError('First-time activation required. Use the activation link from your email.');
+      else setError(msg);
     } finally {
       setSaving(false);
     }

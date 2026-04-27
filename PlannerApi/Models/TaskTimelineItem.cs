@@ -20,4 +20,7 @@ public class PlannerListItem
     public string Currency { get; set; } = "";
     public DateTime SlaDate { get; set; }
     public int OpenPositions { get; set; }
+    public int PlannerId { get; internal set; }
+    public string Title { get; internal set; }
+    public DateTime CreatedAt { get; internal set; }
 }
